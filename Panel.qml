@@ -440,11 +440,12 @@ Item {
                 fontFamily: root.fontFamily
               }
 
-              Flow {
+              Grid {
                 id: fieldFlow
                 width: parent.width
-                spacing: Style.spacing.md
-                implicitHeight: childrenRect.height
+                columns: Math.max(1, Math.floor(width / Style.space(156)))
+                rowSpacing: Style.spacing.md
+                columnSpacing: Style.spacing.md
 
                 Repeater {
                   model: root.fieldOptions
@@ -480,11 +481,12 @@ Item {
                 fontFamily: root.fontFamily
               }
 
-              Flow {
+              Grid {
                 id: logoFlow
                 width: parent.width
-                spacing: Style.spacing.md
-                implicitHeight: childrenRect.height
+                columns: Math.max(1, Math.floor(width / Style.space(156)))
+                rowSpacing: Style.spacing.md
+                columnSpacing: Style.spacing.md
 
                 Repeater {
                   model: root.logoOptions
