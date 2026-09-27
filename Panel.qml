@@ -504,12 +504,12 @@ Item {
             }
 
             Row {
-              width: parent.width
+              anchors.horizontalCenter: parent.horizontalCenter
               spacing: Style.spacing.md
 
               Button {
                 id: applyButton
-                width: root.file !== "" ? Math.round((parent.width - parent.spacing) * 0.62) : parent.width
+                horizontalPadding: Style.space(14)
                 text: root.busy ? "Applying…"
                   : root.pickIsCurrent ? "Current wallpaper"
                   : "Set as wallpaper"
@@ -532,7 +532,7 @@ Item {
               Button {
                 id: removeButton
                 visible: root.file !== ""
-                width: parent.width - applyButton.width - parent.spacing
+                horizontalPadding: Style.space(14)
                 text: "Remove"
                 foreground: root.foreground
                 accent: root.accent
