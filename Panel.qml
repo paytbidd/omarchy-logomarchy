@@ -414,7 +414,7 @@ Item {
 
     BorderSurface {
       id: card
-      width: Math.min(Style.space(520), parent.width - Style.space(32))
+      width: Math.min(Style.space(360), parent.width - Style.space(32))
       height: Math.min(column.implicitHeight + card.contentTopInset + card.contentBottomInset, parent.height - Style.space(32))
       anchors.centerIn: parent
       color: root.background
