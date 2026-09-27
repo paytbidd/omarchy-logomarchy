@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Add or remove the Logomarchy row in the Omarchy menu extension file.
 
-The row sits between marker comments so teardown can drop it with sed even
-after the plugin folder is gone. The menu's JSONC parser skips comment lines
-and tolerates trailing commas, so the block is valid wherever it lands.
-Nothing is written unless the result still parses.
+The row sits between marker comments. Removal drops a block only when both
+markers are present, and nothing is written unless the result still parses.
+A symlinked menu file is edited through the link so the link itself stays.
 """
 
 from __future__ import annotations
@@ -141,6 +140,12 @@ def with_row(text: str, action_bin: str) -> str:
 
 def write_if_changed(path: Path, original: str, text: str) -> None:
     if text == original:
+        return
+    # Follow a symlink. Replacing the path would swap the user's link for a
+    # regular file and leave the target untouched.
+    if path.is_symlink():
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")

@@ -225,8 +225,64 @@ before=$(cat "$MENU")
 check "setup is idempotent" '[[ $(cat "$MENU") == "$before" ]]'
 
 # The service's inline teardown, which runs without the plugin folder.
-sed "/>>> payton\.logomarchy/,/<<< payton\.logomarchy/d" "$MENU" >"$T/menu-sed"
-check "sed teardown leaves valid menu" 'MENU="$T/menu-sed" menu_parses && [[ $(MENU="$T/menu-sed" menu_keys) == "personal personal.notes" ]]'
+service_teardown() {
+  local cfg=$1 script
+  script=$(python3 - "$ROOT/Service.qml" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"readonly property string teardownScript:\n(.*)\n  property bool started", text, re.S)
+assert m, "teardownScript not found"
+parts = re.findall(r"'((?:\\.|[^'])*)'", m.group(1))
+sys.stdout.write("".join(p.encode("utf-8").decode("unicode_escape") for p in parts))
+PY
+)
+  script=${script/sleep 2/true}
+  sh -c "$script" sh "$BIN" "$cfg"
+}
+
+ROW_MENU="$T/menu-with-row.jsonc"
+cp "$MENU" "$ROW_MENU"
+svc_cfg() {
+  local cfg=$1
+  mkdir -p "$cfg/omarchy/extensions" "$cfg/omarchy/hooks/theme-set.d"
+  rm -f "$cfg/omarchy/extensions/omarchy-menu.jsonc"
+  cp "$ROW_MENU" "$cfg/omarchy/extensions/omarchy-menu.jsonc"
+}
+
+CFG="$T/svc"
+svc_cfg "$CFG"
+service_teardown "$CFG"
+check "service teardown removes row" '( MENU="$CFG/omarchy/extensions/omarchy-menu.jsonc"; menu_parses && [[ $(menu_keys) == "personal personal.notes" ]] )'
+
+svc_cfg "$CFG"
+python3 - "$CFG/omarchy/extensions/omarchy-menu.jsonc" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text().replace("// <<< payton.logomarchy\n", ""))
+PY
+before=$(cat "$CFG/omarchy/extensions/omarchy-menu.jsonc")
+service_teardown "$CFG"
+check "service teardown keeps a block with no closing marker" '[[ $(cat "$CFG/omarchy/extensions/omarchy-menu.jsonc") == "$before" ]]'
+
+svc_cfg "$CFG"
+mv "$CFG/omarchy/extensions/omarchy-menu.jsonc" "$CFG/omarchy/extensions/menu-real.jsonc"
+ln -s menu-real.jsonc "$CFG/omarchy/extensions/omarchy-menu.jsonc"
+service_teardown "$CFG"
+check "service teardown keeps a menu symlink" '[[ -L $CFG/omarchy/extensions/omarchy-menu.jsonc && $(readlink "$CFG/omarchy/extensions/omarchy-menu.jsonc") == menu-real.jsonc ]]'
+check "service teardown edits through the symlink" '( MENU="$CFG/omarchy/extensions/menu-real.jsonc"; menu_parses && [[ $(menu_keys) == "personal personal.notes" ]] )'
+
+MENU="$XDG_CONFIG_HOME/omarchy/extensions/omarchy-menu.jsonc"
+python3 "$ROOT/scripts/menu.py" remove "$MENU"
+check "menu.py removes row" 'menu_parses && [[ $(menu_keys) == "personal personal.notes" ]]'
+"$BIN" setup >/dev/null
+ln -sfn "$(basename "$MENU")" "$T/menu-link"
+# point a sibling link at the menu file itself
+rm -f "$T/menu-link"
+ln -s "$(realpath "$MENU")" "$T/menu-link"
+python3 "$ROOT/scripts/menu.py" remove "$T/menu-link"
+check "menu.py keeps a menu symlink" '[[ -L $T/menu-link ]]'
+check "menu.py edits through the symlink" 'menu_parses && [[ $(menu_keys) == "personal personal.notes" ]]'
+"$BIN" setup >/dev/null
 
 "$BIN" teardown
 check "teardown removes hook" '[[ ! -e $HOOK ]]'
