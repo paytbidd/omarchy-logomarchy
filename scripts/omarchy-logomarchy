@@ -21,7 +21,17 @@ PLUGIN_ID="payton.logomarchy"
 WIDTH=3840
 HEIGHT=2160
 SIZES=(default small xsmall)
-STYLES=(dark light accent)
+
+# Field is the wallpaper. Logo is the mark. Hue ids are colors.toml keys
+# and are offered only when that theme actually defines them.
+FIELD_IDS=(dark muted light accent red orange yellow green cyan blue magenta)
+FIELD_LABELS=(Dark Muted Light Accent Red Orange Yellow Green Cyan Blue Magenta)
+LOGO_IDS=(accent contrast foreground background red orange yellow green cyan blue magenta)
+LOGO_LABELS=(Accent Contrast Foreground Background Red Orange Yellow Green Cyan Blue Magenta)
+
+declare -A COLOR=()
+PARSED_FIELD=""
+PARSED_LOGO=""
 
 cell_px() {
   case "$1" in
@@ -36,16 +46,20 @@ usage() {
   cat <<EOF
 Usage:
   omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall]
-                            [--style dark|light|accent] [--set]
+                            [--field <field>] [--logo <logo>]
+                            [--style dark|light|accent|<logo>] [--set]
   omarchy-logomarchy auto [<slug>]    Theme-set hook: default logo if none exists
   omarchy-logomarchy remove [--theme <slug>]
   omarchy-logomarchy get [--json]     Logo wallpaper state for the current theme
   omarchy-logomarchy panel            Open the picker panel
 
-Styles:
-  dark    theme background, accent-colored logo (like the stock wallpapers)
-  light   lighter of background/foreground behind the logo, darker on the mark
-  accent  accent background, logo in the theme background color
+Field is the wallpaper color, logo is the mark. Both come from the theme
+palette. --style is the original three pairings, or a logo color on the
+dark field.
+
+  dark      background field, accent logo (the stock wallpapers)
+  light     lighter of background/foreground behind the mark, darker on it
+  accent    accent field, logo in the theme background color
 EOF
 }
 
@@ -108,11 +122,124 @@ color_value() {
   sed -nE "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\"?(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?\"?.*/\1/p" "$file" | head -n1
 }
 
-# Integer relative luminance, 0–255. Used to decide which theme color is the light one.
+# Integer relative luminance, 0–255.
 luma() {
   local hex=${1#\#}
   local r=$((16#${hex:0:2})) g=$((16#${hex:2:2})) b=$((16#${hex:4:2}))
   echo $(( (2126 * r + 7152 * g + 722 * b) / 10000 ))
+}
+
+lighter_hex() {
+  if (( $(luma "$1") >= $(luma "$2") )); then echo "$1"; else echo "$2"; fi
+}
+
+darker_hex() {
+  if (( $(luma "$1") <= $(luma "$2") )); then echo "$1"; else echo "$2"; fi
+}
+
+hex_eq() {
+  [[ ${1,,} == "${2,,}" ]]
+}
+
+load_theme_colors() {
+  local slug="$1" file key val
+  file=$(theme_colors_file "$slug") || return 1
+  COLOR=()
+  while IFS= read -r key; do
+    val=$(color_value "$file" "$key")
+    [[ -n $val ]] && COLOR["$key"]=$val
+  done < <(sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\1/p' "$file")
+  [[ -n ${COLOR[background]:-} ]] || return 1
+  [[ -n ${COLOR[accent]:-} ]] || COLOR[accent]=${COLOR[foreground]:-}
+  [[ -n ${COLOR[accent]:-} ]]
+}
+
+field_hex() {
+  local bg=${COLOR[background]:-} fg=${COLOR[foreground]:-}
+  case "$1" in
+    dark) echo "$bg" ;;
+    muted) echo "${COLOR[muted]:-}" ;;
+    light)
+      [[ -n $bg && -n $fg ]] || return 0
+      lighter_hex "$bg" "$fg"
+      ;;
+    accent) echo "${COLOR[accent]:-}" ;;
+    *) echo "${COLOR[$1]:-}" ;;
+  esac
+}
+
+logo_hex() {
+  local bg=${COLOR[background]:-} fg=${COLOR[foreground]:-}
+  case "$1" in
+    accent) echo "${COLOR[accent]:-}" ;;
+    contrast)
+      [[ -n $bg && -n $fg ]] || return 0
+      darker_hex "$bg" "$fg"
+      ;;
+    foreground) echo "$fg" ;;
+    background) echo "$bg" ;;
+    *) echo "${COLOR[$1]:-}" ;;
+  esac
+}
+
+# Same color on the field and the mark would erase the logo.
+adjust_logo() {
+  local field_h="$1" logo_h="$2" alt
+  if [[ -z $field_h || -z $logo_h ]] || ! hex_eq "$field_h" "$logo_h"; then
+    echo "$logo_h"
+    return
+  fi
+  for alt in "${COLOR[foreground]:-}" "${COLOR[background]:-}" "${COLOR[accent]:-}"; do
+    [[ -n $alt ]] || continue
+    hex_eq "$alt" "$field_h" && continue
+    echo "$alt"
+    return
+  done
+  echo "$logo_h"
+}
+
+variant_token() {
+  local field="$1" logo="$2"
+  if [[ $field == dark && $logo == accent ]]; then echo dark
+  elif [[ $field == light && $logo == contrast ]]; then echo light
+  elif [[ $field == accent && $logo == background ]]; then echo accent
+  else echo "${field}-${logo}"
+  fi
+}
+
+parse_variant() {
+  local rest="$1"
+  case "$rest" in
+    dark) PARSED_FIELD=dark; PARSED_LOGO=accent ;;
+    light) PARSED_FIELD=light; PARSED_LOGO=contrast ;;
+    accent) PARSED_FIELD=accent; PARSED_LOGO=background ;;
+    *-*)
+      PARSED_FIELD=${rest%%-*}
+      PARSED_LOGO=${rest#*-}
+      in_list "$PARSED_FIELD" "${FIELD_IDS[@]}" || return 1
+      in_list "$PARSED_LOGO" "${LOGO_IDS[@]}" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+json_options() {
+  local kind="$1"
+  local -n ids=$2
+  local -n labels=$3
+  local i hex out='[]' line
+  for i in "${!ids[@]}"; do
+    if [[ $kind == field ]]; then
+      hex=$(field_hex "${ids[$i]}")
+    else
+      hex=$(logo_hex "${ids[$i]}")
+    fi
+    [[ -n $hex ]] || continue
+    line=$(jq -cn --arg value "${ids[$i]}" --arg label "${labels[$i]}" --arg hex "$hex" \
+      '{value:$value,label:$label,hex:$hex}')
+    out=$(jq -cn --argjson arr "$out" --argjson item "$line" '$arr + [$item]')
+  done
+  printf '%s' "$out"
 }
 
 logo_files() {
@@ -133,41 +260,25 @@ theme_ships_logo() {
 }
 
 render() {
-  local slug="$1" size="$2" style="$3"
-  local colors bg accent fore logo_bg logo_fg cell logo_w logo_h out tmp
+  local slug="$1" size="$2" field="$3" logo="$4"
+  local logo_bg logo_fg raw_logo cell logo_w logo_h out tmp token
 
-  colors=$(theme_colors_file "$slug") || die "no colors found for theme '$slug'"
-  bg=$(color_value "$colors" background)
-  accent=$(color_value "$colors" accent)
-  fore=$(color_value "$colors" foreground)
-  [[ -n $accent ]] || accent=$fore
-  [[ -n $bg && -n $accent ]] || die "theme '$slug' is missing background/accent colors"
-
-  if [[ $style == accent ]]; then
-    logo_bg=$accent
-    logo_fg=$bg
-  elif [[ $style == light ]]; then
-    [[ -n $fore ]] || die "theme '$slug' is missing a foreground color"
-    if (( $(luma "$fore") > $(luma "$bg") )); then
-      logo_bg=$fore
-      logo_fg=$bg
-    else
-      logo_bg=$bg
-      logo_fg=$fore
-    fi
-    # Same color on both would erase the mark. Accent still contrasts.
-    [[ ${logo_fg,,} == "${logo_bg,,}" ]] && logo_fg=$accent
-  else
-    logo_bg=$bg
-    logo_fg=$accent
-  fi
+  load_theme_colors "$slug" || die "no colors found for theme '$slug'"
+  in_list "$field" "${FIELD_IDS[@]}" || die "field must be one of: ${FIELD_IDS[*]}"
+  in_list "$logo" "${LOGO_IDS[@]}" || die "logo must be one of: ${LOGO_IDS[*]}"
+  logo_bg=$(field_hex "$field")
+  raw_logo=$(logo_hex "$logo")
+  [[ -n $logo_bg ]] || die "theme '$slug' has no $field color"
+  [[ -n $raw_logo ]] || die "theme '$slug' has no $logo color"
+  logo_fg=$(adjust_logo "$logo_bg" "$raw_logo")
 
   cell=$(cell_px "$size")
   logo_w=$((81 * cell))
   logo_h=$((19 * cell))
+  token=$(variant_token "$field" "$logo")
 
   mkdir -p "$USER_BACKGROUNDS/$slug"
-  out="$USER_BACKGROUNDS/$slug/omarchy-logo-$size-$style.png"
+  out="$USER_BACKGROUNDS/$slug/omarchy-logo-$size-$token.png"
   tmp=$(mktemp --suffix=.png)
 
   sed "s/fill=\"#000\"/fill=\"$logo_fg\"/" "$LOGO_SVG" |
@@ -191,13 +302,16 @@ set_background() {
 }
 
 cmd_generate() {
-  local slug="" size=default style=dark set=0 out
+  local slug="" size=default style="" field_flag="" logo_flag="" set=0
+  local field logo out
 
   while (($#)); do
     case "$1" in
       --theme) slug="${2:-}"; shift 2 ;;
       --size) size="${2:-}"; shift 2 ;;
       --style) style="${2:-}"; shift 2 ;;
+      --field) field_flag="${2:-}"; shift 2 ;;
+      --logo) logo_flag="${2:-}"; shift 2 ;;
       --set) set=1; shift ;;
       *) die "unknown option: $1" ;;
     esac
@@ -206,9 +320,24 @@ cmd_generate() {
   [[ -n $slug ]] || slug=$(current_theme)
   valid_slug "$slug" || die "invalid theme: '$slug'"
   in_list "$size" "${SIZES[@]}" || die "size must be one of: ${SIZES[*]}"
-  in_list "$style" "${STYLES[@]}" || die "style must be one of: ${STYLES[*]}"
 
-  out=$(render "$slug" "$size" "$style")
+  case "$style" in
+    ""|dark) field=dark; logo=accent ;;
+    light) field=light; logo=contrast ;;
+    accent) field=accent; logo=background ;;
+    *)
+      if in_list "$style" "${LOGO_IDS[@]}"; then
+        field=dark
+        logo=$style
+      else
+        die "style must be one of: dark light accent ${LOGO_IDS[*]}"
+      fi
+      ;;
+  esac
+  [[ -n $field_flag ]] && field=$field_flag
+  [[ -n $logo_flag ]] && logo=$logo_flag
+
+  out=$(render "$slug" "$size" "$field" "$logo")
   if ((set)) && [[ $slug == "$(current_theme)" ]]; then
     set_background "$out"
   fi
@@ -224,7 +353,7 @@ cmd_auto() {
   logo_files "$slug" | grep -q . && exit 0
   theme_ships_logo "$slug" && exit 0
 
-  out=$(render "$slug" default dark) || exit 0
+  out=$(render "$slug" default dark accent) || exit 0
 
   # A theme with no backgrounds of its own left the previous theme's
   # wallpaper up; show the new logo instead.
@@ -257,7 +386,9 @@ cmd_remove() {
 }
 
 cmd_get() {
-  local slug file="" size="" style="" active=false current
+  local slug file="" size="" style="" field="" logo="" active=false current
+  local fields='[]' logos='[]' adjusted=false
+  local logo_bg raw_logo resolved
   slug=$(current_theme)
   file=$(logo_files "$slug" | head -n1)
   current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
@@ -266,20 +397,44 @@ cmd_get() {
     local name=${file##*/}
     name=${name#omarchy-logo-}
     name=${name%.png}
-    size=${name%-*}
-    style=${name##*-}
+    size=${name%%-*}
+    local rest=${name#*-}
+    if in_list "$size" "${SIZES[@]}" && parse_variant "$rest"; then
+      field=$PARSED_FIELD
+      logo=$PARSED_LOGO
+      style=$(variant_token "$field" "$logo")
+    else
+      size=""
+    fi
     [[ $current == "$file" ]] && active=true
+  fi
+
+  if load_theme_colors "$slug"; then
+    fields=$(json_options field FIELD_IDS FIELD_LABELS)
+    logos=$(json_options logo LOGO_IDS LOGO_LABELS)
+    if [[ -n $field && -n $logo ]]; then
+      logo_bg=$(field_hex "$field")
+      raw_logo=$(logo_hex "$logo")
+      resolved=$(adjust_logo "$logo_bg" "$raw_logo")
+      if [[ -n $raw_logo && -n $resolved ]] && ! hex_eq "$raw_logo" "$resolved"; then
+        adjusted=true
+      fi
+    fi
   fi
 
   if [[ ${1:-} == --json ]]; then
     jq -cn --arg theme "$slug" --arg file "$file" --arg size "$size" \
-      --arg style "$style" --argjson active "$active" \
+      --arg style "$style" --arg field "$field" --arg logo "$logo" \
+      --argjson active "$active" \
       --argjson shipsLogo "$(theme_ships_logo "$slug" && echo true || echo false)" \
-      '{theme: $theme, file: $file, size: $size, style: $style, active: $active, shipsLogo: $shipsLogo}'
+      --argjson fields "$fields" --argjson logos "$logos" \
+      --argjson adjusted "$adjusted" \
+      '{theme:$theme, file:$file, size:$size, style:$style, field:$field, logo:$logo,
+        active:$active, shipsLogo:$shipsLogo, fields:$fields, logos:$logos, adjusted:$adjusted}'
   else
     echo "theme:  $slug"
     echo "file:   ${file:-none}"
-    [[ -n $file ]] && echo "size:   $size" && echo "style:  $style" && echo "active: $active"
+    [[ -n $file ]] && echo "size:   $size" && echo "style:  $style" && echo "field:  $field" && echo "logo:   $logo" && echo "active: $active"
   fi
 }
 

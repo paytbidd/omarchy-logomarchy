@@ -17,10 +17,14 @@ Item {
   property string theme: ""
   property string file: ""
   property string size: "default"
-  property string style: "dark"
+  property string field: "dark"
+  property string logo: "accent"
+  property bool adjusted: false
   property bool shipsLogo: false
   property bool busy: false
   property var queued: null
+  property var fieldOptions: []
+  property var logoOptions: []
 
   property string focusSection: "size"
   property int selectedIndex: 0
@@ -41,17 +45,85 @@ Item {
     { value: "small", label: "Small" },
     { value: "xsmall", label: "Extra small" }
   ]
-  readonly property var styleOptions: [
-    { value: "dark", label: "Dark" },
-    { value: "light", label: "Light" },
-    { value: "accent", label: "Accent" }
-  ]
+  readonly property var visibleSections: file !== "" ? ["size", "field", "logo", "remove"] : ["size", "field", "logo"]
   readonly property string styleCaption: {
-    if (style === "light") return "Light background, logo in the theme's dark color."
-    if (style === "accent") return "Accent background, logo in the theme's background color."
-    return "Theme background, accent-colored logo."
+    if (adjusted)
+      return "Those two colors match, so the logo uses another theme color that still shows."
+    if (field === "light" && logo === "contrast")
+      return "Light background, logo in the theme's dark color."
+    if (field === "accent" && logo === "background")
+      return "Accent background, logo in the theme's background color."
+    if (field === "dark" && logo === "accent")
+      return "Theme background, accent-colored logo."
+    return optionLabel(fieldOptions, field) + " background, " + optionLabel(logoOptions, logo).toLowerCase() + " logo."
   }
-  readonly property var visibleSections: file !== "" ? ["size", "style", "remove"] : ["size", "style"]
+
+  component PaletteChip: Rectangle {
+    id: chip
+
+    property string label: ""
+    property color swatch: "transparent"
+    property bool selected: false
+    property bool hasCursor: false
+    signal clicked()
+    signal hovered(bool isHovered)
+
+    readonly property bool hot: mouse.containsMouse || hasCursor
+    implicitWidth: chipRow.implicitWidth + Style.spacing.controlPaddingX * 2 + Style.space(2)
+    implicitHeight: Math.max(chipRow.implicitHeight, Style.space(10)) + Style.spacing.controlPaddingY * 2 + Style.space(2)
+    width: implicitWidth
+    height: implicitHeight
+    radius: Style.cornerRadius
+    color: selected ? Style.selectedFillFor(root.foreground, root.accent)
+         : hot ? Style.hoverFillFor(root.foreground, root.accent)
+         : "transparent"
+    border.width: Math.max(1, Style.spacing.hairline)
+    border.color: selected || hot ? Qt.alpha(root.foreground, 0.72) : Qt.alpha(root.foreground, 0.28)
+
+    Row {
+      id: chipRow
+      anchors.centerIn: parent
+      spacing: Style.spacing.sm
+
+      Rectangle {
+        width: Style.space(10)
+        height: width
+        radius: width / 2
+        color: chip.swatch
+        border.width: Style.spacing.hairline
+        border.color: Qt.alpha(root.foreground, 0.45)
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        text: chip.label
+        textFormat: Text.PlainText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+
+    MouseArea {
+      id: mouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: chip.clicked()
+      onContainsMouseChanged: chip.hovered(containsMouse)
+    }
+  }
+
+  function optionLabel(options, value) {
+    for (var i = 0; i < options.length; i++)
+      if (options[i].value === value) return options[i].label
+    return value
+  }
+
+  function optionValue(options, index) {
+    if (!options || index < 0 || index >= options.length) return ""
+    return options[index].value
+  }
 
   function open(payloadJson) {
     opened = true
@@ -83,8 +155,12 @@ Item {
     theme = state.theme || ""
     file = state.file || ""
     shipsLogo = !!state.shipsLogo
+    adjusted = !!state.adjusted
     if (state.size) size = state.size
-    if (state.style) style = state.style
+    if (state.field) field = state.field
+    if (state.logo) logo = state.logo
+    if (state.fields) fieldOptions = state.fields
+    if (state.logos) logoOptions = state.logos
   }
 
   function run(args) {
@@ -98,14 +174,49 @@ Item {
     runProc.running = true
   }
 
-  function generate(nextSize, nextStyle) {
+  function generate(nextSize, nextField, nextLogo) {
     size = nextSize
-    style = nextStyle
-    run([bin, "generate", "--size", nextSize, "--style", nextStyle, "--set"])
+    field = nextField
+    logo = nextLogo
+    run([bin, "generate", "--size", nextSize, "--field", nextField, "--logo", nextLogo, "--set"])
   }
 
   function remove() {
     run([bin, "remove"])
+  }
+
+  function sectionItem() {
+    if (focusSection === "field") return chipAt(fieldFlow, selectedIndex)
+    if (focusSection === "logo") return chipAt(logoFlow, selectedIndex)
+    if (focusSection === "size") return sizeSection
+    if (focusSection === "remove") return removeButton
+    return null
+  }
+
+  function chipAt(flow, index) {
+    if (!flow) return null
+    var kids = flow.children
+    for (var i = 0; i < kids.length; i++) {
+      var kid = kids[i]
+      if (kid && kid.index === index) return kid
+    }
+    return flow
+  }
+
+  function reveal(item) {
+    if (!item || !scroll) return
+    var pos = item.mapToItem(scroll, 0, 0)
+    var margin = Style.space(8)
+    if (pos.y < margin) scroll.contentY = Math.max(0, scroll.contentY + pos.y - margin)
+    else if (pos.y + item.height > scroll.height - margin)
+      scroll.contentY = scroll.contentY + pos.y + item.height - scroll.height + margin
+    var maxY = Math.max(0, scroll.contentHeight - scroll.height)
+    if (scroll.contentY > maxY) scroll.contentY = maxY
+    if (scroll.contentY < 0) scroll.contentY = 0
+  }
+
+  function revealSoon() {
+    Qt.callLater(function() { root.reveal(root.sectionItem()) })
   }
 
   function moveCursor(delta) {
@@ -115,18 +226,30 @@ Item {
     if (next !== i) {
       focusSection = sections[next]
       selectedIndex = 0
+      revealSoon()
     }
   }
 
   function moveCursorH(delta) {
-    var count = focusSection === "size" ? sizeOptions.length : focusSection === "style" ? styleOptions.length : 1
+    var count = focusSection === "size" ? sizeOptions.length
+      : focusSection === "field" ? fieldOptions.length
+      : focusSection === "logo" ? logoOptions.length
+      : 1
+    if (count < 1) return
     selectedIndex = Math.max(0, Math.min(count - 1, selectedIndex + delta))
+    revealSoon()
   }
 
   function activateCursor() {
-    if (focusSection === "size") generate(sizeOptions[selectedIndex].value, style)
-    else if (focusSection === "style") generate(size, styleOptions[selectedIndex].value)
-    else if (focusSection === "remove") remove()
+    var picked
+    if (focusSection === "size") generate(sizeOptions[selectedIndex].value, field, logo)
+    else if (focusSection === "field") {
+      picked = optionValue(fieldOptions, selectedIndex)
+      if (picked) generate(size, picked, logo)
+    } else if (focusSection === "logo") {
+      picked = optionValue(logoOptions, selectedIndex)
+      if (picked) generate(size, field, picked)
+    } else if (focusSection === "remove") remove()
   }
 
   Process {
@@ -174,7 +297,7 @@ Item {
 
     BorderSurface {
       id: card
-      width: Math.min(Style.space(420), parent.width - Style.space(32))
+      width: Math.min(Style.space(520), parent.width - Style.space(32))
       height: Math.min(column.implicitHeight + card.contentTopInset + card.contentBottomInset, parent.height - Style.space(32))
       anchors.centerIn: parent
       color: root.background
@@ -202,155 +325,219 @@ Item {
         onActivateRequested: if (root.cursorActive) root.activateCursor()
         onCloseRequested: root.dismiss()
 
-        Column {
-          id: column
-          width: parent.width
-          spacing: Style.space(14)
+        Flickable {
+          id: scroll
+          anchors.fill: parent
+          contentWidth: width
+          contentHeight: column.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          flickableDirection: Flickable.VerticalFlick
+          interactive: contentHeight > height + 1
 
-          PanelHero {
-            width: parent.width
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            title: "Logomarchy"
-            meta: root.theme !== "" ? root.theme : "No theme"
-            iconComponent: Component {
-              Text {
-                text: "󰸉"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.display
+          Column {
+            id: column
+            width: scroll.width
+            spacing: Style.space(14)
+
+            PanelHero {
+              width: parent.width
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              title: "Logomarchy"
+              meta: root.theme !== "" ? root.theme : "No theme"
+              iconComponent: Component {
+                Text {
+                  text: "󰸉"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.display
+                }
               }
-            }
-          }
-
-          Rectangle {
-            width: parent.width
-            height: Math.round(width * 9 / 16)
-            radius: Style.cornerRadius
-            color: Qt.darker(root.background, 1.2)
-            clip: true
-
-            Image {
-              anchors.fill: parent
-              source: root.file !== "" ? "file://" + root.file : ""
-              fillMode: Image.PreserveAspectCrop
-              asynchronous: true
-              cache: false
-              smooth: true
-              sourceSize.width: 840
-            }
-
-            Text {
-              anchors.centerIn: parent
-              visible: root.file === ""
-              width: parent.width - Style.space(32)
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.WordWrap
-              textFormat: Text.PlainText
-              text: root.shipsLogo
-                ? "This theme ships its own logo wallpaper. Pick a size or style to make one of your own."
-                : "Pick a size or style to make a logo wallpaper for this theme."
-              color: Qt.darker(root.foreground, 1.5)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
             }
 
             Rectangle {
-              anchors.fill: parent
-              radius: parent.radius
-              color: "transparent"
-              border.width: Style.spacing.hairline
-              border.color: Qt.alpha(root.foreground, 0.32)
-              antialiasing: radius > 0
-            }
-          }
-
-          Column {
-            width: parent.width
-            spacing: Style.space(6)
-
-            PanelSectionHeader {
-              text: "SIZE"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            ButtonGroup {
               width: parent.width
-              foreground: root.foreground
-              background: root.background
-              accent: root.accent
-              fontFamily: root.fontFamily
-              focusable: false
-              cursorIndex: root.cursorActive && root.focusSection === "size" ? root.selectedIndex : -1
-              value: root.file !== "" ? root.size : ""
-              options: root.sizeOptions
-              onChanged: function(v) { root.generate(v, root.style) }
-              onHovered: function(index, on) {
-                if (!on) return
-                root.cursorActive = true
-                root.focusSection = "size"
-                root.selectedIndex = index
+              height: Math.min(Math.round(width * 9 / 16), Style.space(180))
+              radius: Style.cornerRadius
+              color: Qt.darker(root.background, 1.2)
+              clip: true
+
+              Image {
+                anchors.fill: parent
+                source: root.file !== "" ? "file://" + root.file : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: false
+                smooth: true
+                sourceSize.width: 840
               }
-            }
-          }
 
-          Column {
-            width: parent.width
-            spacing: Style.space(6)
+              Text {
+                anchors.centerIn: parent
+                visible: root.file === ""
+                width: parent.width - Style.space(32)
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                text: root.shipsLogo
+                  ? "This theme ships its own logo wallpaper. Pick a size or colors to make one of your own."
+                  : "Pick a size or colors to make a logo wallpaper for this theme."
+                color: Qt.darker(root.foreground, 1.5)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
 
-            PanelSectionHeader {
-              text: "STYLE"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            ButtonGroup {
-              width: parent.width
-              foreground: root.foreground
-              background: root.background
-              accent: root.accent
-              fontFamily: root.fontFamily
-              focusable: false
-              cursorIndex: root.cursorActive && root.focusSection === "style" ? root.selectedIndex : -1
-              value: root.file !== "" ? root.style : ""
-              options: root.styleOptions
-              onChanged: function(v) { root.generate(root.size, v) }
-              onHovered: function(index, on) {
-                if (!on) return
-                root.cursorActive = true
-                root.focusSection = "style"
-                root.selectedIndex = index
+              Rectangle {
+                anchors.fill: parent
+                radius: parent.radius
+                color: "transparent"
+                border.width: Style.spacing.hairline
+                border.color: Qt.alpha(root.foreground, 0.32)
+                antialiasing: radius > 0
               }
             }
 
-            Text {
+            Column {
+              id: sizeSection
               width: parent.width
-              textFormat: Text.PlainText
-              text: root.styleCaption
-              color: Qt.darker(root.foreground, 1.5)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-          }
+              spacing: Style.space(6)
 
-          Button {
-            visible: root.file !== ""
-            width: parent.width
-            text: "Remove from this theme"
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            bordered: true
-            hasCursor: root.cursorActive && root.focusSection === "remove"
-            onHovered: function(on) {
-              if (!on) return
-              root.cursorActive = true
-              root.focusSection = "remove"
-              root.selectedIndex = 0
+              PanelSectionHeader {
+                text: "SIZE"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
+              ButtonGroup {
+                width: parent.width
+                foreground: root.foreground
+                background: root.background
+                accent: root.accent
+                fontFamily: root.fontFamily
+                focusable: false
+                cursorIndex: root.cursorActive && root.focusSection === "size" ? root.selectedIndex : -1
+                value: root.file !== "" ? root.size : ""
+                options: root.sizeOptions
+                onChanged: function(v) { root.generate(v, root.field, root.logo) }
+                onHovered: function(index, on) {
+                  if (!on) return
+                  root.cursorActive = true
+                  root.focusSection = "size"
+                  root.selectedIndex = index
+                }
+              }
             }
-            onClicked: root.remove()
+
+            Column {
+              id: fieldSection
+              width: parent.width
+              spacing: Style.space(6)
+
+              PanelSectionHeader {
+                text: "FIELD"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
+              Flow {
+                id: fieldFlow
+                width: parent.width
+                spacing: Style.spacing.md
+                implicitHeight: childrenRect.height
+
+                Repeater {
+                  model: root.fieldOptions
+
+                  delegate: PaletteChip {
+                    required property var modelData
+                    required property int index
+                    label: modelData.label
+                    swatch: modelData.hex
+                    selected: root.file !== "" && root.field === modelData.value
+                    hasCursor: root.cursorActive && root.focusSection === "field" && root.selectedIndex === index
+                    onClicked: root.generate(root.size, modelData.value, root.logo)
+                    onHovered: function(on) {
+                      if (!on) return
+                      root.cursorActive = true
+                      root.focusSection = "field"
+                      root.selectedIndex = index
+                      root.revealSoon()
+                    }
+                  }
+                }
+              }
+            }
+
+            Column {
+              id: logoSection
+              width: parent.width
+              spacing: Style.space(6)
+
+              PanelSectionHeader {
+                text: "LOGO"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
+              Flow {
+                id: logoFlow
+                width: parent.width
+                spacing: Style.spacing.md
+                implicitHeight: childrenRect.height
+
+                Repeater {
+                  model: root.logoOptions
+
+                  delegate: PaletteChip {
+                    required property var modelData
+                    required property int index
+                    label: modelData.label
+                    swatch: modelData.hex
+                    selected: root.file !== "" && root.logo === modelData.value
+                    hasCursor: root.cursorActive && root.focusSection === "logo" && root.selectedIndex === index
+                    onClicked: root.generate(root.size, root.field, modelData.value)
+                    onHovered: function(on) {
+                      if (!on) return
+                      root.cursorActive = true
+                      root.focusSection = "logo"
+                      root.selectedIndex = index
+                      root.revealSoon()
+                    }
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.styleCaption
+                color: Qt.darker(root.foreground, 1.5)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            Button {
+              id: removeButton
+              visible: root.file !== ""
+              width: parent.width
+              text: "Remove from this theme"
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              bordered: true
+              hasCursor: root.cursorActive && root.focusSection === "remove"
+              onHovered: function(on) {
+                if (!on) return
+                root.cursorActive = true
+                root.focusSection = "remove"
+                root.selectedIndex = 0
+                root.revealSoon()
+              }
+              onClicked: root.remove()
+            }
           }
         }
       }

@@ -58,6 +58,11 @@ check() {
 }
 
 make_theme plain "#89b4fa" "#1e1e2e"
+cat >>"$OMARCHY_PATH/themes/plain/colors.toml" <<'EOF'
+muted = "#2d3450"
+blue = "#3366ff"
+red = "#ff3355"
+EOF
 make_theme stock "#81a1c1" "#2e3440"
 touch "$OMARCHY_PATH/themes/stock/backgrounds/omarchy.png"
 touch "$OMARCHY_PATH/themes/stock/backgrounds/1-art.png"
@@ -83,8 +88,28 @@ out=$("$BIN" generate --theme paper --style light)
 check "light field stays light" '[[ $(pixel "$out" 0 0) == FAF4ED* ]]'
 check "light logo is the dark color" 'magick "$out" -format %c histogram:info: | grep -qi 575279'
 
+out=$("$BIN" generate --theme plain --field dark --logo blue)
+check "palette logo filename" '[[ $out == "$BG/plain/omarchy-logo-default-dark-blue.png" ]]'
+check "palette logo color" 'magick "$out" -format %c histogram:info: | grep -qi 3366FF'
+check "palette logo keeps dark field" '[[ $(pixel "$out" 0 0) == 1E1E2E* ]]'
+
+out=$("$BIN" generate --theme plain --field blue --logo red)
+check "palette field" '[[ $(pixel "$out" 0 0) == 3366FF* ]]'
+check "palette field logo" 'magick "$out" -format %c histogram:info: | grep -qi FF3355'
+
+out=$("$BIN" generate --theme plain --field light --logo blue)
+check "light field with palette logo" '[[ $(pixel "$out" 0 0) == FFFFFF* && $out == *light-blue.png ]]'
+
+out=$("$BIN" generate --theme plain --field accent --logo accent)
+check "matching colors keep the field" '[[ $(pixel "$out" 0 0) == 89B4FA* ]]'
+check "matching colors move the logo" 'magick "$out" -format %c histogram:info: | grep -qi FFFFFF'
+
+out=$("$BIN" generate --theme plain --field muted --logo accent)
+check "muted field" '[[ $(pixel "$out" 0 0) == 2D3450* ]]'
+
 check "rejects bad size" '! "$BIN" generate --theme plain --size huge 2>/dev/null'
 check "rejects bad style" '! "$BIN" generate --theme plain --style neon 2>/dev/null'
+check "rejects missing logo color" '! "$BIN" generate --theme paper --logo blue 2>/dev/null'
 check "rejects path slug" '! "$BIN" generate --theme ../x 2>/dev/null'
 
 # Auto: new theme with no backgrounds gets the logo set as wallpaper.
@@ -119,11 +144,21 @@ check "get with no logo" '[[ $(jq -r .file <<<"$json") == "" ]]'
 json=$("$BIN" get --json)
 check "get size" '[[ $(jq -r .size <<<"$json") == small ]]'
 check "get style" '[[ $(jq -r .style <<<"$json") == accent ]]'
+check "get field" '[[ $(jq -r .field <<<"$json") == accent ]]'
+check "get logo" '[[ $(jq -r .logo <<<"$json") == background ]]'
 check "get active" '[[ $(jq -r .active <<<"$json") == true ]]'
+check "get offers blue" 'jq -e ".logos[] | select(.value==\"blue\" and (.hex|ascii_downcase)==\"#3366ff\")" <<<"$json" >/dev/null'
+check "get hides missing orange" '[[ $(jq -r "[.logos[].value] | index(\"orange\")" <<<"$json") == null ]]'
 
 # Remove clears the file and moves off it.
 "$BIN" remove
 check "remove deletes files" '[[ ! -d $BG/plain ]]'
 check "remove moves to next background" '[[ $(tail -n1 "$T/bg-set.log") == next ]]'
+
+mkdir -p "$BG/plain"
+touch "$BG/plain/omarchy-logo-xsmall-light.png"
+json=$("$BIN" get --json)
+check "legacy light field" '[[ $(jq -r .field <<<"$json") == light ]]'
+check "legacy light logo" '[[ $(jq -r .logo <<<"$json") == contrast ]]'
 
 echo "ok - $pass checks"
