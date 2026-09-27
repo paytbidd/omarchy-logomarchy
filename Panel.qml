@@ -358,7 +358,7 @@ Item {
 
             Rectangle {
               width: parent.width
-              height: Math.min(Math.round(width * 9 / 16), Style.space(180))
+              height: Math.min(Math.round(width * 9 / 16), Style.space(88))
               radius: Style.cornerRadius
               color: Qt.darker(root.background, 1.2)
               clip: true
