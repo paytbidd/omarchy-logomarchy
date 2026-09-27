@@ -248,6 +248,15 @@ Item {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
+
+            Rectangle {
+              anchors.fill: parent
+              radius: parent.radius
+              color: "transparent"
+              border.width: Style.spacing.hairline
+              border.color: Qt.alpha(root.foreground, 0.32)
+              antialiasing: radius > 0
+            }
           }
 
           Column {
