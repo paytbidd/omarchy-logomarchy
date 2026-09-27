@@ -5,8 +5,9 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
-// Menu-summoned Logomarchy panel. Every pick regenerates the current
-// theme's logo wallpaper through scripts/omarchy-logomarchy and shows it.
+// Menu-summoned Logomarchy panel. Picks only redraw the preview, which is
+// the vector logo drawn in QML; Apply renders the 4K file through
+// scripts/omarchy-logomarchy and sets it as the wallpaper.
 Item {
   id: root
 
@@ -16,15 +17,22 @@ Item {
 
   property string theme: ""
   property string file: ""
-  property string size: "default"
-  property string field: "dark"
-  property string logo: "accent"
-  property bool adjusted: false
+  property bool active: false
+  property string size: ""
+  property string field: ""
+  property string logo: ""
+  property string pickSize: "default"
+  property string pickField: "dark"
+  property string pickLogo: "accent"
+  property bool picksLoaded: false
   property bool shipsLogo: false
   property bool busy: false
   property var queued: null
   property var fieldOptions: []
   property var logoOptions: []
+  property var pairs: ({})
+  property string logoSvg: ""
+  property int canvasWidth: 3840
 
   property string focusSection: "size"
   property int selectedIndex: 0
@@ -40,22 +48,40 @@ Item {
   readonly property color accent: Color.accent
   readonly property string fontFamily: Style.font.family
 
-  readonly property var sizeOptions: [
-    { value: "default", label: "Default" },
-    { value: "small", label: "Small" },
-    { value: "xsmall", label: "Extra small" }
+  property var sizeOptions: [
+    { value: "default", label: "Default", cellPx: 20 },
+    { value: "small", label: "Small", cellPx: 12 },
+    { value: "xsmall", label: "Extra small", cellPx: 7 }
   ]
-  readonly property var visibleSections: file !== "" ? ["size", "field", "logo", "remove"] : ["size", "field", "logo"]
+  readonly property bool pickIsCurrent: file !== "" && active
+    && pickSize === size && pickField === field && pickLogo === logo
+  readonly property var visibleSections: file !== "" ? ["size", "field", "logo", "apply", "remove"] : ["size", "field", "logo", "apply"]
+  readonly property var pickPair: pairs[pickField + ":" + pickLogo] || null
+  readonly property bool adjusted: {
+    if (!pickPair) return false
+    var raw = optionHex(logoOptions, pickLogo)
+    return raw !== "" && raw.toLowerCase() !== String(pickPair.logo).toLowerCase()
+  }
+  // The logo is 81 grid cells wide; cellPx is its cell size on the 4K canvas.
+  readonly property real logoFraction: {
+    for (var i = 0; i < sizeOptions.length; i++)
+      if (sizeOptions[i].value === pickSize) return 81 * sizeOptions[i].cellPx / canvasWidth
+    return 0.42
+  }
+  readonly property string previewLogoUrl: {
+    if (logoSvg === "" || !pickPair) return ""
+    return "data:image/svg+xml;utf8," + encodeURIComponent(logoSvg.split('fill="#000"').join('fill="' + pickPair.logo + '"'))
+  }
   readonly property string styleCaption: {
     if (adjusted)
       return "Those two colors match, so the logo uses another theme color that still shows."
-    if (field === "light" && logo === "contrast")
+    if (pickField === "light" && pickLogo === "contrast")
       return "Light background, logo in the theme's dark color."
-    if (field === "accent" && logo === "background")
+    if (pickField === "accent" && pickLogo === "background")
       return "Accent background, logo in the theme's background color."
-    if (field === "dark" && logo === "accent")
-      return "Theme background, accent-colored logo."
-    return optionLabel(fieldOptions, field) + " background, " + optionLabel(logoOptions, logo).toLowerCase() + " logo."
+    if (pickField === "dark" && pickLogo === "accent")
+      return "Theme background, accent-colored logo. Matches the stock wallpapers."
+    return optionLabel(fieldOptions, pickField) + " background, " + optionLabel(logoOptions, pickLogo).toLowerCase() + " logo."
   }
 
   component PaletteChip: Rectangle {
@@ -120,6 +146,18 @@ Item {
     return value
   }
 
+  function optionHex(options, value) {
+    for (var i = 0; i < options.length; i++)
+      if (options[i].value === value) return String(options[i].hex || "")
+    return ""
+  }
+
+  function hasOption(options, value) {
+    for (var i = 0; i < options.length; i++)
+      if (options[i].value === value) return true
+    return false
+  }
+
   function optionValue(options, index) {
     if (!options || index < 0 || index >= options.length) return ""
     return options[index].value
@@ -127,6 +165,7 @@ Item {
 
   function open(payloadJson) {
     opened = true
+    picksLoaded = false
     cursorActive = false
     focusSection = "size"
     selectedIndex = 0
@@ -154,13 +193,28 @@ Item {
     try { state = JSON.parse(String(raw).trim()) } catch (e) { return }
     theme = state.theme || ""
     file = state.file || ""
+    active = !!state.active
     shipsLogo = !!state.shipsLogo
-    adjusted = !!state.adjusted
-    if (state.size) size = state.size
-    if (state.field) field = state.field
-    if (state.logo) logo = state.logo
+    size = state.size || ""
+    field = state.field || ""
+    logo = state.logo || ""
     if (state.fields) fieldOptions = state.fields
     if (state.logos) logoOptions = state.logos
+    if (state.sizes && state.sizes.length) sizeOptions = state.sizes
+    if (state.pairs) pairs = state.pairs
+    if (state.logoSvg) logoSvg = state.logoSvg
+    if (state.canvas && state.canvas[0]) canvasWidth = state.canvas[0]
+
+    // Start from the theme's saved variant, then leave the picks alone so
+    // a refresh never overwrites what is being previewed.
+    if (!picksLoaded) {
+      pickSize = size || "default"
+      pickField = field || "dark"
+      pickLogo = logo || "accent"
+      if (!hasOption(fieldOptions, pickField) && fieldOptions.length) pickField = fieldOptions[0].value
+      if (!hasOption(logoOptions, pickLogo) && logoOptions.length) pickLogo = logoOptions[0].value
+      picksLoaded = true
+    }
   }
 
   function run(args) {
@@ -174,11 +228,9 @@ Item {
     runProc.running = true
   }
 
-  function generate(nextSize, nextField, nextLogo) {
-    size = nextSize
-    field = nextField
-    logo = nextLogo
-    run([bin, "generate", "--size", nextSize, "--field", nextField, "--logo", nextLogo, "--set"])
+  function apply() {
+    if (pickIsCurrent) return
+    run([bin, "generate", "--size", pickSize, "--field", pickField, "--logo", pickLogo, "--set"])
   }
 
   function remove() {
@@ -189,6 +241,7 @@ Item {
     if (focusSection === "field") return chipAt(fieldFlow, selectedIndex)
     if (focusSection === "logo") return chipAt(logoFlow, selectedIndex)
     if (focusSection === "size") return sizeSection
+    if (focusSection === "apply") return applyButton
     if (focusSection === "remove") return removeButton
     return null
   }
@@ -242,14 +295,15 @@ Item {
 
   function activateCursor() {
     var picked
-    if (focusSection === "size") generate(sizeOptions[selectedIndex].value, field, logo)
+    if (focusSection === "size") pickSize = optionValue(sizeOptions, selectedIndex) || pickSize
     else if (focusSection === "field") {
       picked = optionValue(fieldOptions, selectedIndex)
-      if (picked) generate(size, picked, logo)
+      if (picked) pickField = picked
     } else if (focusSection === "logo") {
       picked = optionValue(logoOptions, selectedIndex)
-      if (picked) generate(size, field, picked)
-    } else if (focusSection === "remove") remove()
+      if (picked) pickLogo = picked
+    } else if (focusSection === "apply") apply()
+    else if (focusSection === "remove") remove()
   }
 
   Process {
@@ -357,35 +411,23 @@ Item {
             }
 
             Rectangle {
-              width: parent.width
-              height: Math.min(Math.round(width * 9 / 16), Style.space(88))
+              id: preview
+              height: Math.min(Math.round(parent.width * 9 / 16), Style.space(200))
+              width: Math.round(height * 16 / 9)
+              anchors.horizontalCenter: parent.horizontalCenter
               radius: Style.cornerRadius
-              color: Qt.darker(root.background, 1.2)
+              color: root.pickPair ? root.pickPair.field : Qt.darker(root.background, 1.2)
               clip: true
 
               Image {
-                anchors.fill: parent
-                source: root.file !== "" ? "file://" + root.file : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: false
-                smooth: true
-                sourceSize.width: 840
-              }
-
-              Text {
                 anchors.centerIn: parent
-                visible: root.file === ""
-                width: parent.width - Style.space(32)
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                text: root.shipsLogo
-                  ? "This theme ships its own logo wallpaper. Pick a size or colors to make one of your own."
-                  : "Pick a size or colors to make a logo wallpaper for this theme."
-                color: Qt.darker(root.foreground, 1.5)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
+                width: Math.round(preview.width * root.logoFraction)
+                height: Math.round(width * 285 / 1215)
+                sourceSize.width: width
+                sourceSize.height: height
+                source: root.previewLogoUrl
+                smooth: true
+                mipmap: false
               }
 
               Rectangle {
@@ -417,9 +459,9 @@ Item {
                 fontFamily: root.fontFamily
                 focusable: false
                 cursorIndex: root.cursorActive && root.focusSection === "size" ? root.selectedIndex : -1
-                value: root.file !== "" ? root.size : ""
+                value: root.pickSize
                 options: root.sizeOptions
-                onChanged: function(v) { root.generate(v, root.field, root.logo) }
+                onChanged: function(v) { root.pickSize = v }
                 onHovered: function(index, on) {
                   if (!on) return
                   root.cursorActive = true
@@ -443,7 +485,7 @@ Item {
               Grid {
                 id: fieldFlow
                 width: parent.width
-                columns: Math.max(1, Math.floor(width / Style.space(156)))
+                columns: Math.max(1, Math.min(4, Math.floor(width / Style.space(116))))
                 rowSpacing: Style.spacing.md
                 columnSpacing: Style.spacing.md
 
@@ -455,9 +497,9 @@ Item {
                     required property int index
                     label: modelData.label
                     swatch: modelData.hex
-                    selected: root.file !== "" && root.field === modelData.value
+                    selected: root.pickField === modelData.value
                     hasCursor: root.cursorActive && root.focusSection === "field" && root.selectedIndex === index
-                    onClicked: root.generate(root.size, modelData.value, root.logo)
+                    onClicked: root.pickField = modelData.value
                     onHovered: function(on) {
                       if (!on) return
                       root.cursorActive = true
@@ -484,7 +526,7 @@ Item {
               Grid {
                 id: logoFlow
                 width: parent.width
-                columns: Math.max(1, Math.floor(width / Style.space(156)))
+                columns: Math.max(1, Math.min(4, Math.floor(width / Style.space(116))))
                 rowSpacing: Style.spacing.md
                 columnSpacing: Style.spacing.md
 
@@ -496,9 +538,9 @@ Item {
                     required property int index
                     label: modelData.label
                     swatch: modelData.hex
-                    selected: root.file !== "" && root.logo === modelData.value
+                    selected: root.pickLogo === modelData.value
                     hasCursor: root.cursorActive && root.focusSection === "logo" && root.selectedIndex === index
-                    onClicked: root.generate(root.size, root.field, modelData.value)
+                    onClicked: root.pickLogo = modelData.value
                     onHovered: function(on) {
                       if (!on) return
                       root.cursorActive = true
@@ -519,6 +561,28 @@ Item {
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
               }
+            }
+
+            Button {
+              id: applyButton
+              width: parent.width
+              text: root.busy ? "Applying…"
+                : root.pickIsCurrent ? "Current wallpaper"
+                : "Set as wallpaper"
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              bordered: true
+              opacity: root.pickIsCurrent && !root.busy ? 0.55 : 1
+              hasCursor: root.cursorActive && root.focusSection === "apply"
+              onHovered: function(on) {
+                if (!on) return
+                root.cursorActive = true
+                root.focusSection = "apply"
+                root.selectedIndex = 0
+                root.revealSoon()
+              }
+              onClicked: root.apply()
             }
 
             Button {

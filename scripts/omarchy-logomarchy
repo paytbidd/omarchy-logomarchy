@@ -22,12 +22,14 @@ WIDTH=3840
 HEIGHT=2160
 SIZES=(default small xsmall)
 
-# Field is the wallpaper. Logo is the mark. Hue ids are colors.toml keys
-# and are offered only when that theme actually defines them.
-FIELD_IDS=(dark muted light accent red orange yellow green cyan blue magenta)
-FIELD_LABELS=(Dark Muted Light Accent Red Orange Yellow Green Cyan Blue Magenta)
-LOGO_IDS=(accent contrast foreground background red orange yellow green cyan blue magenta)
-LOGO_LABELS=(Accent Contrast Foreground Background Red Orange Yellow Green Cyan Blue Magenta)
+SIZE_LABELS=(Default Small "Extra small")
+
+# Field is the wallpaper. Logo is the mark. An option is offered only when
+# the theme defines its color (not every theme has "muted").
+FIELD_IDS=(dark muted light accent)
+FIELD_LABELS=(Dark Muted Light Accent)
+LOGO_IDS=(accent foreground contrast background)
+LOGO_LABELS=(Accent Foreground Contrast Background)
 
 declare -A COLOR=()
 PARSED_FIELD=""
@@ -164,7 +166,6 @@ field_hex() {
       lighter_hex "$bg" "$fg"
       ;;
     accent) echo "${COLOR[accent]:-}" ;;
-    *) echo "${COLOR[$1]:-}" ;;
   esac
 }
 
@@ -178,7 +179,6 @@ logo_hex() {
       ;;
     foreground) echo "$fg" ;;
     background) echo "$bg" ;;
-    *) echo "${COLOR[$1]:-}" ;;
   esac
 }
 
@@ -242,6 +242,30 @@ json_options() {
   printf '%s' "$out"
 }
 
+json_sizes() {
+  local i out=()
+  for i in "${!SIZES[@]}"; do
+    out+=("$(jq -cn --arg value "${SIZES[$i]}" --arg label "${SIZE_LABELS[$i]}" \
+      --argjson cells "$(cell_px "${SIZES[$i]}")" '{value:$value,label:$label,cellPx:$cells}')")
+  done
+  printf '%s\n' "${out[@]}" | jq -cs .
+}
+
+# The logo color each field/logo pairing really renders with, keyed
+# "field:logo", so the panel preview matches adjust_logo exactly.
+json_pairs() {
+  local f l bg raw
+  for f in "${FIELD_IDS[@]}"; do
+    bg=$(field_hex "$f")
+    [[ -n $bg ]] || continue
+    for l in "${LOGO_IDS[@]}"; do
+      raw=$(logo_hex "$l")
+      [[ -n $raw ]] || continue
+      printf '%s:%s\t%s\t%s\n' "$f" "$l" "$bg" "$(adjust_logo "$bg" "$raw")"
+    done
+  done | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: {field: .[1], logo: .[2]}}) | from_entries'
+}
+
 logo_files() {
   local slug="$1"
   [[ -d $USER_BACKGROUNDS/$slug ]] || return 0
@@ -261,7 +285,7 @@ theme_ships_logo() {
 
 render() {
   local slug="$1" size="$2" field="$3" logo="$4"
-  local logo_bg logo_fg raw_logo cell logo_w logo_h out tmp token
+  local logo_bg logo_fg raw_logo cell x y svg inner out tmp token
 
   load_theme_colors "$slug" || die "no colors found for theme '$slug'"
   in_list "$field" "${FIELD_IDS[@]}" || die "field must be one of: ${FIELD_IDS[*]}"
@@ -273,26 +297,28 @@ render() {
   logo_fg=$(adjust_logo "$logo_bg" "$raw_logo")
 
   cell=$(cell_px "$size")
-  logo_w=$((81 * cell))
-  logo_h=$((19 * cell))
+  x=$(((WIDTH - 81 * cell) / 2))
+  y=$(((HEIGHT - 19 * cell) / 2))
   token=$(variant_token "$field" "$logo")
 
   mkdir -p "$USER_BACKGROUNDS/$slug"
   out="$USER_BACKGROUNDS/$slug/omarchy-logo-$size-$token.png"
   tmp=$(mktemp --suffix=.png)
 
-  sed "s/fill=\"#000\"/fill=\"$logo_fg\"/" "$LOGO_SVG" |
-    rsvg-convert -w "$logo_w" -h "$logo_h" -f png -o "$tmp"
-
-  magick -size "${WIDTH}x${HEIGHT}" "xc:$logo_bg" "$tmp" \
-    -gravity center -composite -depth 8 -strip "PNG24:$tmp.full"
-  rm -f "$tmp"
+  # One rsvg pass draws the field and the scaled logo together.
+  svg=$(<"$LOGO_SVG")
+  inner=${svg#*>}
+  inner=${inner%</svg>*}
+  printf '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><rect width="%d" height="%d" fill="%s"/><g transform="translate(%d %d) scale(%s)">%s</g></svg>' \
+    "$WIDTH" "$HEIGHT" "$WIDTH" "$HEIGHT" "$logo_bg" "$x" "$y" "$(awk -v c="$cell" 'BEGIN { printf "%.6f", c / 15 }')" \
+    "${inner//fill=\"#000\"/fill=\"$logo_fg\"}" |
+    rsvg-convert -f png -o "$tmp"
 
   # One logo wallpaper per theme: drop the previous variant.
   logo_files "$slug" | while read -r old; do
     [[ $old == "$out" ]] || rm -f "$old"
   done
-  mv "$tmp.full" "$out"
+  mv "$tmp" "$out"
 
   echo "$out"
 }
@@ -387,7 +413,7 @@ cmd_remove() {
 
 cmd_get() {
   local slug file="" size="" style="" field="" logo="" active=false current
-  local fields='[]' logos='[]' adjusted=false
+  local fields='[]' logos='[]' pairs='{}' sizes='[]' adjusted=false
   local logo_bg raw_logo resolved
   slug=$(current_theme)
   file=$(logo_files "$slug" | head -n1)
@@ -412,6 +438,7 @@ cmd_get() {
   if load_theme_colors "$slug"; then
     fields=$(json_options field FIELD_IDS FIELD_LABELS)
     logos=$(json_options logo LOGO_IDS LOGO_LABELS)
+    pairs=$(json_pairs)
     if [[ -n $field && -n $logo ]]; then
       logo_bg=$(field_hex "$field")
       raw_logo=$(logo_hex "$logo")
@@ -423,14 +450,18 @@ cmd_get() {
   fi
 
   if [[ ${1:-} == --json ]]; then
-    jq -cn --arg theme "$slug" --arg file "$file" --arg size "$size" \
+    sizes=$(json_sizes)
+    jq -cn --rawfile logoSvg "$LOGO_SVG" --argjson sizes "$sizes" --argjson pairs "$pairs" \
+      --argjson canvas "[$WIDTH,$HEIGHT]" \
+      --arg theme "$slug" --arg file "$file" --arg size "$size" \
       --arg style "$style" --arg field "$field" --arg logo "$logo" \
       --argjson active "$active" \
       --argjson shipsLogo "$(theme_ships_logo "$slug" && echo true || echo false)" \
       --argjson fields "$fields" --argjson logos "$logos" \
       --argjson adjusted "$adjusted" \
       '{theme:$theme, file:$file, size:$size, style:$style, field:$field, logo:$logo,
-        active:$active, shipsLogo:$shipsLogo, fields:$fields, logos:$logos, adjusted:$adjusted}'
+        active:$active, shipsLogo:$shipsLogo, fields:$fields, logos:$logos, adjusted:$adjusted,
+        sizes:$sizes, pairs:$pairs, logoSvg:$logoSvg, canvas:$canvas}'
   else
     echo "theme:  $slug"
     echo "file:   ${file:-none}"
