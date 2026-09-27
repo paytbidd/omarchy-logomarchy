@@ -21,7 +21,7 @@ PLUGIN_ID="payton.logomarchy"
 WIDTH=3840
 HEIGHT=2160
 SIZES=(default small xsmall)
-STYLES=(dark accent)
+STYLES=(dark light accent)
 
 cell_px() {
   case "$1" in
@@ -36,7 +36,7 @@ usage() {
   cat <<EOF
 Usage:
   omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall]
-                            [--style dark|accent] [--set]
+                            [--style dark|light|accent] [--set]
   omarchy-logomarchy auto [<slug>]    Theme-set hook: default logo if none exists
   omarchy-logomarchy remove [--theme <slug>]
   omarchy-logomarchy get [--json]     Logo wallpaper state for the current theme
@@ -44,6 +44,7 @@ Usage:
 
 Styles:
   dark    theme background, accent-colored logo (like the stock wallpapers)
+  light   lighter of background/foreground behind the logo, darker on the mark
   accent  accent background, logo in the theme background color
 EOF
 }
@@ -107,6 +108,13 @@ color_value() {
   sed -nE "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\"?(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?\"?.*/\1/p" "$file" | head -n1
 }
 
+# Integer relative luminance, 0–255. Used to decide which theme color is the light one.
+luma() {
+  local hex=${1#\#}
+  local r=$((16#${hex:0:2})) g=$((16#${hex:2:2})) b=$((16#${hex:4:2}))
+  echo $(( (2126 * r + 7152 * g + 722 * b) / 10000 ))
+}
+
 logo_files() {
   local slug="$1"
   [[ -d $USER_BACKGROUNDS/$slug ]] || return 0
@@ -126,20 +134,32 @@ theme_ships_logo() {
 
 render() {
   local slug="$1" size="$2" style="$3"
-  local colors bg fg logo_bg logo_fg cell logo_w logo_h out tmp
+  local colors bg accent fore logo_bg logo_fg cell logo_w logo_h out tmp
 
   colors=$(theme_colors_file "$slug") || die "no colors found for theme '$slug'"
   bg=$(color_value "$colors" background)
-  fg=$(color_value "$colors" accent)
-  [[ -n $fg ]] || fg=$(color_value "$colors" foreground)
-  [[ -n $bg && -n $fg ]] || die "theme '$slug' is missing background/accent colors"
+  accent=$(color_value "$colors" accent)
+  fore=$(color_value "$colors" foreground)
+  [[ -n $accent ]] || accent=$fore
+  [[ -n $bg && -n $accent ]] || die "theme '$slug' is missing background/accent colors"
 
   if [[ $style == accent ]]; then
-    logo_bg=$fg
+    logo_bg=$accent
     logo_fg=$bg
+  elif [[ $style == light ]]; then
+    [[ -n $fore ]] || die "theme '$slug' is missing a foreground color"
+    if (( $(luma "$fore") > $(luma "$bg") )); then
+      logo_bg=$fore
+      logo_fg=$bg
+    else
+      logo_bg=$bg
+      logo_fg=$fore
+    fi
+    # Same color on both would erase the mark. Accent still contrasts.
+    [[ ${logo_fg,,} == "${logo_bg,,}" ]] && logo_fg=$accent
   else
     logo_bg=$bg
-    logo_fg=$fg
+    logo_fg=$accent
   fi
 
   cell=$(cell_px "$size")

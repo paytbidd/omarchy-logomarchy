@@ -11,7 +11,7 @@ Themes that already ship an Omarchy logo wallpaper are left alone, unless you pi
 To change the logo on the current theme, open **Style › Logomarchy** in the Omarchy menu:
 
 - **Size:** Default, Small, Extra small
-- **Style:** Dark (theme background, accent logo) or Accent (accent background, logo in the theme's background color, so it comes out dark on dark themes and light on light ones)
+- **Style:** Dark (theme background, accent logo), Light (the lighter of the theme's background and foreground behind the logo, the darker color on the mark), or Accent (accent background, logo in the theme's background color)
 
 Each theme remembers its own choice.
 
@@ -46,7 +46,7 @@ omarchy plugin remove payton.logomarchy
 ## CLI
 
 ```bash
-omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall] [--style dark|accent] [--set]
+omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall] [--style dark|light|accent] [--set]
 omarchy-logomarchy auto [<slug>]      # what the hook runs
 omarchy-logomarchy remove [--theme <slug>]
 omarchy-logomarchy get [--json]

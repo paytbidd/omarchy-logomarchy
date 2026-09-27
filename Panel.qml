@@ -43,8 +43,14 @@ Item {
   ]
   readonly property var styleOptions: [
     { value: "dark", label: "Dark" },
+    { value: "light", label: "Light" },
     { value: "accent", label: "Accent" }
   ]
+  readonly property string styleCaption: {
+    if (style === "light") return "Light background, logo in the theme's dark color."
+    if (style === "accent") return "Accent background, logo in the theme's background color."
+    return "Theme background, accent-colored logo."
+  }
   readonly property var visibleSections: file !== "" ? ["size", "style", "remove"] : ["size", "style"]
 
   function open(payloadJson) {
@@ -321,9 +327,7 @@ Item {
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: root.style === "accent"
-                ? "Accent background, logo in the theme's background color."
-                : "Theme background, accent-colored logo."
+              text: root.styleCaption
               color: Qt.darker(root.foreground, 1.5)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

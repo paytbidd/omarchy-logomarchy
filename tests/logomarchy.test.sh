@@ -34,7 +34,7 @@ export PATH="$T/bin:$PATH"
 make_theme() {
   local dir="$OMARCHY_PATH/themes/$1"
   mkdir -p "$dir/backgrounds"
-  printf 'accent = "%s"\nbackground = "%s"\nforeground = "#ffffff"\n' "$2" "$3" >"$dir/colors.toml"
+  printf 'accent = "%s"\nbackground = "%s"\nforeground = "%s"\n' "$2" "$3" "${4:-#ffffff}" >"$dir/colors.toml"
 }
 
 use_theme() {
@@ -73,6 +73,15 @@ out=$("$BIN" generate --theme plain --size xsmall --style accent)
 check "accent background" '[[ $(pixel "$out" 0 0) == 89B4FA* ]]'
 check "xsmall logo width" '[[ $(magick "$out" -trim -format %w info:) == 567 ]]'
 check "previous variant replaced" '[[ $(ls "$BG/plain" | wc -l) == 1 ]]'
+
+out=$("$BIN" generate --theme plain --size default --style light)
+check "light background" '[[ $(pixel "$out" 0 0) == FFFFFF* ]]'
+check "light logo" 'magick "$out" -format %c histogram:info: | grep -qi 1E1E2E'
+
+make_theme paper "#56949f" "#faf4ed" "#575279"
+out=$("$BIN" generate --theme paper --style light)
+check "light field stays light" '[[ $(pixel "$out" 0 0) == FAF4ED* ]]'
+check "light logo is the dark color" 'magick "$out" -format %c histogram:info: | grep -qi 575279'
 
 check "rejects bad size" '! "$BIN" generate --theme plain --size huge 2>/dev/null'
 check "rejects bad style" '! "$BIN" generate --theme plain --style neon 2>/dev/null'
