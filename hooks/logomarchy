@@ -1,0 +1,9 @@
+#!/bin/bash
+# Give the newly applied theme an Omarchy logo wallpaper if it lacks one.
+set -euo pipefail
+
+SCRIPT="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/payton.logomarchy/scripts/omarchy-logomarchy"
+if [[ -x $SCRIPT ]]; then
+  exec "$SCRIPT" auto "$1"
+fi
+exit 0

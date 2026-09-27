@@ -1,0 +1,11 @@
+#!/bin/bash
+# Remove the theme-set hook and every generated logo wallpaper.
+set -euo pipefail
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+rm -f "$CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+find "$CONFIG_HOME/omarchy/backgrounds" -mindepth 2 -maxdepth 2 -type f -name 'omarchy-logo-*.png' -delete 2>/dev/null || true
+find "$CONFIG_HOME/omarchy/backgrounds" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
+
+echo "Removed logo wallpapers and hook. Remove the plugin with: omarchy plugin remove payton.logomarchy"

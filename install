@@ -1,0 +1,15 @@
+#!/bin/bash
+# One-shot install: clone payton.logomarchy, add the theme-set hook, and
+# give the current theme a logo wallpaper.
+set -euo pipefail
+
+PLUGIN_URL="https://github.com/paytbidd/omarchy-logomarchy.git"
+PLUGIN_ID="payton.logomarchy"
+PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
+
+if [[ ! -d $PLUGINS_DIR/$PLUGIN_ID ]]; then
+  omarchy plugin add "$PLUGIN_URL" --yes --enable
+fi
+
+omarchy hook install theme-set "$PLUGINS_DIR/$PLUGIN_ID/hooks/logomarchy"
+"$PLUGINS_DIR/$PLUGIN_ID/scripts/omarchy-logomarchy" auto

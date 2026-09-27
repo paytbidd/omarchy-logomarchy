@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "payton.logomarchy",
+  "name": "Logomarchy",
+  "version": "1.0.0",
+  "author": "Payton Biddington",
+  "description": "The Omarchy logo wallpaper in every theme's colors, with size and style options",
+  "homepage": "https://github.com/paytbidd/omarchy-logomarchy",
+  "license": "MIT",
+  "kinds": [
+    "panel"
+  ],
+  "entryPoints": {
+    "panel": "Panel.qml"
+  }
+}

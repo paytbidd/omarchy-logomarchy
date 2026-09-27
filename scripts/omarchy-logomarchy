@@ -1,0 +1,274 @@
+#!/bin/bash
+# Generate an Omarchy logo wallpaper in any theme's colors.
+#
+# Output lives in ~/.config/omarchy/backgrounds/<theme>/, which Omarchy
+# already includes when choosing and cycling a theme's backgrounds, so
+# nothing inside the theme itself is touched.
+set -euo pipefail
+
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+STATE_DIR="$HOME/.local/state/omarchy/current"
+USER_THEMES="$CONFIG_HOME/omarchy/themes"
+STOCK_THEMES="$OMARCHY_PATH/themes"
+USER_BACKGROUNDS="${LOGOMARCHY_BACKGROUNDS:-$CONFIG_HOME/omarchy/backgrounds}"
+LOGO_SVG="${LOGOMARCHY_LOGO:-$OMARCHY_PATH/logo.svg}"
+PLUGIN_ID="payton.logomarchy"
+
+# Stock logo wallpapers are 3840x2160 with the logo ~1600px wide. The SVG
+# is drawn on a 15-unit pixel grid (81 cells wide), so whole-pixel cells
+# keep the edges crisp.
+WIDTH=3840
+HEIGHT=2160
+SIZES=(default small xsmall)
+STYLES=(dark accent)
+
+cell_px() {
+  case "$1" in
+    default) echo 20 ;;
+    small) echo 12 ;;
+    xsmall) echo 7 ;;
+    *) return 1 ;;
+  esac
+}
+
+usage() {
+  cat <<EOF
+Usage:
+  omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall]
+                            [--style dark|accent] [--set]
+  omarchy-logomarchy auto [<slug>]    Theme-set hook: default logo if none exists
+  omarchy-logomarchy remove [--theme <slug>]
+  omarchy-logomarchy get [--json]     Logo wallpaper state for the current theme
+  omarchy-logomarchy panel            Open the picker panel
+
+Styles:
+  dark    theme background, accent-colored logo (like the stock wallpapers)
+  accent  accent background, logo in the theme background color
+EOF
+}
+
+die() {
+  echo "omarchy-logomarchy: $*" >&2
+  exit 1
+}
+
+current_theme() {
+  cat "$STATE_DIR/theme.name" 2>/dev/null || true
+}
+
+valid_slug() {
+  [[ -n $1 && $1 != .* && $1 != */* ]]
+}
+
+in_list() {
+  local needle="$1" item
+  shift
+  for item in "$@"; do
+    [[ $item == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+# Prints the path of a colors.toml for the theme, deriving one from
+# alacritty.toml for older themes (the same fallback omarchy-theme-set uses).
+theme_colors_file() {
+  local slug="$1" dir scratch
+
+  if [[ $slug == "$(current_theme)" && -f $STATE_DIR/theme/colors.toml ]]; then
+    echo "$STATE_DIR/theme/colors.toml"
+    return
+  fi
+
+  for dir in "$USER_THEMES/$slug" "$STOCK_THEMES/$slug"; do
+    if [[ -f $dir/colors.toml ]]; then
+      echo "$dir/colors.toml"
+      return
+    fi
+  done
+
+  for dir in "$USER_THEMES/$slug" "$STOCK_THEMES/$slug"; do
+    if [[ -f $dir/alacritty.toml && ! -L $dir/alacritty.toml ]]; then
+      scratch=$(mktemp -d)
+      cp "$dir/alacritty.toml" "$scratch/"
+      omarchy-theme-colors-from-alacritty "$scratch" >/dev/null 2>&1 || true
+      if [[ -f $scratch/colors.toml ]]; then
+        echo "$scratch/colors.toml"
+        return
+      fi
+    fi
+  done
+
+  return 1
+}
+
+color_value() {
+  local file="$1" key="$2"
+  sed -nE "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\"?(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?\"?.*/\1/p" "$file" | head -n1
+}
+
+logo_files() {
+  local slug="$1"
+  [[ -d $USER_BACKGROUNDS/$slug ]] || return 0
+  find "$USER_BACKGROUNDS/$slug" -maxdepth 1 -type f -name 'omarchy-logo-*.png' | sort
+}
+
+theme_ships_logo() {
+  local slug="$1" dir
+  for dir in "$USER_THEMES/$slug/backgrounds" "$STOCK_THEMES/$slug/backgrounds"; do
+    [[ -d $dir ]] || continue
+    if find "$dir" -maxdepth 1 -type f -iname '*omarchy*' | grep -q .; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+render() {
+  local slug="$1" size="$2" style="$3"
+  local colors bg fg logo_bg logo_fg cell logo_w logo_h out tmp
+
+  colors=$(theme_colors_file "$slug") || die "no colors found for theme '$slug'"
+  bg=$(color_value "$colors" background)
+  fg=$(color_value "$colors" accent)
+  [[ -n $fg ]] || fg=$(color_value "$colors" foreground)
+  [[ -n $bg && -n $fg ]] || die "theme '$slug' is missing background/accent colors"
+
+  if [[ $style == accent ]]; then
+    logo_bg=$fg
+    logo_fg=$bg
+  else
+    logo_bg=$bg
+    logo_fg=$fg
+  fi
+
+  cell=$(cell_px "$size")
+  logo_w=$((81 * cell))
+  logo_h=$((19 * cell))
+
+  mkdir -p "$USER_BACKGROUNDS/$slug"
+  out="$USER_BACKGROUNDS/$slug/omarchy-logo-$size-$style.png"
+  tmp=$(mktemp --suffix=.png)
+
+  sed "s/fill=\"#000\"/fill=\"$logo_fg\"/" "$LOGO_SVG" |
+    rsvg-convert -w "$logo_w" -h "$logo_h" -f png -o "$tmp"
+
+  magick -size "${WIDTH}x${HEIGHT}" "xc:$logo_bg" "$tmp" \
+    -gravity center -composite -depth 8 -strip "PNG24:$tmp.full"
+  rm -f "$tmp"
+
+  # One logo wallpaper per theme: drop the previous variant.
+  logo_files "$slug" | while read -r old; do
+    [[ $old == "$out" ]] || rm -f "$old"
+  done
+  mv "$tmp.full" "$out"
+
+  echo "$out"
+}
+
+set_background() {
+  omarchy-theme-bg-set "$1" >/dev/null 2>&1 || true
+}
+
+cmd_generate() {
+  local slug="" size=default style=dark set=0 out
+
+  while (($#)); do
+    case "$1" in
+      --theme) slug="${2:-}"; shift 2 ;;
+      --size) size="${2:-}"; shift 2 ;;
+      --style) style="${2:-}"; shift 2 ;;
+      --set) set=1; shift ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  [[ -n $slug ]] || slug=$(current_theme)
+  valid_slug "$slug" || die "invalid theme: '$slug'"
+  in_list "$size" "${SIZES[@]}" || die "size must be one of: ${SIZES[*]}"
+  in_list "$style" "${STYLES[@]}" || die "style must be one of: ${STYLES[*]}"
+
+  out=$(render "$slug" "$size" "$style")
+  if ((set)) && [[ $slug == "$(current_theme)" ]]; then
+    set_background "$out"
+  fi
+  echo "$out"
+}
+
+# Runs after every theme change. Leaves any variant the user picked alone,
+# and skips themes that already ship their own Omarchy logo wallpaper.
+cmd_auto() {
+  local slug="${1:-$(current_theme)}" out current
+
+  valid_slug "$slug" || exit 0
+  logo_files "$slug" | grep -q . && exit 0
+  theme_ships_logo "$slug" && exit 0
+
+  out=$(render "$slug" default dark) || exit 0
+
+  # A theme with no backgrounds of its own left the previous theme's
+  # wallpaper up; show the new logo instead.
+  current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
+  if [[ $slug == "$(current_theme)" ]] &&
+    [[ -z $current || ! -f $current || ($current != "$STATE_DIR/theme/"* && $current != "$USER_BACKGROUNDS/$slug/"*) ]]; then
+    set_background "$out"
+  fi
+}
+
+cmd_remove() {
+  local slug="" current
+
+  while (($#)); do
+    case "$1" in
+      --theme) slug="${2:-}"; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [[ -n $slug ]] || slug=$(current_theme)
+  valid_slug "$slug" || die "invalid theme: '$slug'"
+
+  current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
+  logo_files "$slug" | while read -r f; do rm -f "$f"; done
+  rmdir "$USER_BACKGROUNDS/$slug" 2>/dev/null || true
+
+  if [[ $slug == "$(current_theme)" && -n $current && ! -f $current ]]; then
+    omarchy-theme-bg-next >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_get() {
+  local slug file="" size="" style="" active=false current
+  slug=$(current_theme)
+  file=$(logo_files "$slug" | head -n1)
+  current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
+
+  if [[ -n $file ]]; then
+    local name=${file##*/}
+    name=${name#omarchy-logo-}
+    name=${name%.png}
+    size=${name%-*}
+    style=${name##*-}
+    [[ $current == "$file" ]] && active=true
+  fi
+
+  if [[ ${1:-} == --json ]]; then
+    jq -cn --arg theme "$slug" --arg file "$file" --arg size "$size" \
+      --arg style "$style" --argjson active "$active" \
+      --argjson shipsLogo "$(theme_ships_logo "$slug" && echo true || echo false)" \
+      '{theme: $theme, file: $file, size: $size, style: $style, active: $active, shipsLogo: $shipsLogo}'
+  else
+    echo "theme:  $slug"
+    echo "file:   ${file:-none}"
+    [[ -n $file ]] && echo "size:   $size" && echo "style:  $style" && echo "active: $active"
+  fi
+}
+
+case "${1:-}" in
+  generate) shift; cmd_generate "$@" ;;
+  auto) shift; cmd_auto "$@" ;;
+  remove) shift; cmd_remove "$@" ;;
+  get) shift; cmd_get "$@" ;;
+  panel) omarchy-shell shell summon "$PLUGIN_ID" "{}" ;;
+  -h | --help | help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac
