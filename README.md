@@ -11,8 +11,10 @@ Themes that already ship an Omarchy logo wallpaper are left alone, unless you pi
 To change the logo on the current theme, open **Style › Logomarchy** in the Omarchy menu:
 
 - **Size:** Default, Small, Extra small
-- **Field:** the wallpaper color. Dark, Muted, Light, Accent (Muted only when the theme's `colors.toml` defines it)
-- **Logo:** the mark. Accent, Foreground, Contrast (the theme's darker color), Background
+- **Background:** Dark, Deep, Muted, Light, Accent, plus a row of the theme's palette hues (red, orange, yellow, green, cyan, blue, magenta)
+- **Logo:** Accent, Foreground, Contrast (the theme's darker color), Background, plus the same hues
+
+Colors are unlabeled swatches. One only appears when the theme defines that color, and once per distinct color. Themes without named hues use their ANSI `color1`–`color6`.
 
 Picking an option only redraws the preview, which the panel draws from the vector logo, so it's instant. **Set as wallpaper** renders the 4K file and applies it.
 

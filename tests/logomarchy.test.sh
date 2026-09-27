@@ -93,8 +93,17 @@ check "pairing filename" '[[ $out == "$BG/plain/omarchy-logo-default-dark-foregr
 check "pairing logo color" 'magick "$out" -format %c histogram:info: | grep -qi FFFFFF'
 check "pairing keeps dark field" '[[ $(pixel "$out" 0 0) == 1E1E2E* ]]'
 
-check "rejects palette hue field" '! "$BIN" generate --theme plain --field blue 2>/dev/null'
-check "rejects palette hue logo" '! "$BIN" generate --theme plain --logo red 2>/dev/null'
+out=$("$BIN" generate --theme plain --field blue --logo red)
+check "hue field" '[[ $(pixel "$out" 0 0) == 3366FF* ]]'
+check "hue logo" 'magick "$out" -format %c histogram:info: | grep -qi FF3355'
+
+# Themes derived from alacritty.toml only have ANSI slots.
+make_theme ansi "#d66b6b" "#1b1112"
+printf 'color1 = "#b44a4a"\ncolor4 = "#4a6ab4"\n' >>"$OMARCHY_PATH/themes/ansi/colors.toml"
+out=$("$BIN" generate --theme ansi --field blue --logo red)
+check "ansi slot field" '[[ $(pixel "$out" 0 0) == 4A6AB4* ]]'
+check "ansi slot logo" 'magick "$out" -format %c histogram:info: | grep -qi B44A4A'
+check "rejects unknown color" '! "$BIN" generate --theme plain --field teal 2>/dev/null'
 
 out=$("$BIN" generate --theme plain --field accent --logo accent)
 check "matching colors keep the field" '[[ $(pixel "$out" 0 0) == 89B4FA* ]]'
@@ -143,7 +152,9 @@ check "get style" '[[ $(jq -r .style <<<"$json") == accent ]]'
 check "get field" '[[ $(jq -r .field <<<"$json") == accent ]]'
 check "get logo" '[[ $(jq -r .logo <<<"$json") == background ]]'
 check "get active" '[[ $(jq -r .active <<<"$json") == true ]]'
-check "get offers at most 5 per group" '[[ $(jq "[.fields, .logos, .sizes | length] | max" <<<"$json") -le 5 ]]'
+check "get primaries at most 5" '[[ $(jq "[.fields, .logos | map(select(.group==\"primary\")) | length] | max" <<<"$json") -le 5 ]]'
+check "get hue secondaries" '[[ $(jq -c "[.fields[] | select(.group==\"secondary\") | .value]" <<<"$json") == "[\"red\",\"blue\"]" ]]'
+check "get dedupes colors" '[[ $(jq "[.logos[].hex | ascii_downcase] | length == (unique | length)" <<<"$json") == true ]]'
 check "get sizes" '[[ $(jq -c "[.sizes[] | [.value, .cellPx]]" <<<"$json") == "[[\"default\",20],[\"small\",12],[\"xsmall\",7]]" ]]'
 check "get pair colors" '[[ $(jq -r ".pairs[\"dark:accent\"] | .field + .logo" <<<"$json") == "#1e1e2e#89b4fa" ]]'
 check "get pair resolves clash" '[[ $(jq -r ".pairs[\"accent:accent\"].logo" <<<"$json") == "#ffffff" ]]'

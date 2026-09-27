@@ -53,9 +53,13 @@ Item {
     { value: "small", label: "Small", cellPx: 12 },
     { value: "xsmall", label: "Extra small", cellPx: 7 }
   ]
-  readonly property bool pickIsCurrent: file !== "" && active
-    && pickSize === size && pickField === field && pickLogo === logo
-  readonly property var visibleSections: file !== "" ? ["size", "field", "logo", "apply", "remove"] : ["size", "field", "logo", "apply"]
+  // Compared by color: two ids can resolve to the same pair.
+  readonly property bool pickIsCurrent: {
+    if (file === "" || !active || pickSize !== size || !pickPair) return false
+    var saved = pairs[field + ":" + logo]
+    return !!saved && sameHex(saved.field, pickPair.field) && sameHex(saved.logo, pickPair.logo)
+  }
+  readonly property var visibleSections: file !== "" ? ["apply", "remove", "size", "field", "logo"] : ["apply", "size", "field", "logo"]
   readonly property var pickPair: pairs[pickField + ":" + pickLogo] || null
   readonly property bool adjusted: {
     if (!pickPair) return false
@@ -72,78 +76,137 @@ Item {
     if (logoSvg === "" || !pickPair) return ""
     return "data:image/svg+xml;utf8," + encodeURIComponent(logoSvg.split('fill="#000"').join('fill="' + pickPair.logo + '"'))
   }
-  readonly property string styleCaption: {
-    if (adjusted)
-      return "Those two colors match, so the logo uses another theme color that still shows."
-    if (pickField === "light" && pickLogo === "contrast")
-      return "Light background, logo in the theme's dark color."
-    if (pickField === "accent" && pickLogo === "background")
-      return "Accent background, logo in the theme's background color."
-    if (pickField === "dark" && pickLogo === "accent")
-      return "Theme background, accent-colored logo. Matches the stock wallpapers."
-    return optionLabel(fieldOptions, pickField) + " background, " + optionLabel(logoOptions, pickLogo).toLowerCase() + " logo."
-  }
+  readonly property string styleCaption: adjusted
+    ? "Those two colors match, so the logo uses another theme color that still shows."
+    : ""
 
-  component PaletteChip: Rectangle {
-    id: chip
+  // Unlabeled color button. A ring around the circle marks the pick.
+  component Swatch: Item {
+    id: swatch
 
-    property string label: ""
-    property color swatch: "transparent"
+    property int swatchIndex: 0
+    property color swatchColor: "transparent"
+    property real diameter: Style.space(26)
     property bool selected: false
     property bool hasCursor: false
     signal clicked()
     signal hovered(bool isHovered)
 
     readonly property bool hot: mouse.containsMouse || hasCursor
-    implicitWidth: chipRow.implicitWidth + Style.spacing.controlPaddingX * 2 + Style.space(2)
-    implicitHeight: Math.max(chipRow.implicitHeight, Style.space(10)) + Style.spacing.controlPaddingY * 2 + Style.space(2)
-    width: implicitWidth
-    height: implicitHeight
-    radius: Style.cornerRadius
-    color: selected ? Style.selectedFillFor(root.foreground, root.accent)
-         : hot ? Style.hoverFillFor(root.foreground, root.accent)
-         : "transparent"
-    border.width: Math.max(1, Style.spacing.hairline)
-    border.color: selected || hot ? Qt.alpha(root.foreground, 0.72) : Qt.alpha(root.foreground, 0.28)
+    readonly property real ring: Math.max(2, Style.space(2))
+    readonly property real gap: Math.max(2, Style.space(3))
+    width: diameter + (ring + gap) * 2
+    height: width
 
-    Row {
-      id: chipRow
+    Rectangle {
+      anchors.fill: parent
+      radius: width / 2
+      color: "transparent"
+      border.width: swatch.ring
+      border.color: swatch.selected ? root.foreground
+        : swatch.hot ? Qt.alpha(root.foreground, 0.4)
+        : "transparent"
+    }
+
+    Rectangle {
       anchors.centerIn: parent
-      spacing: Style.spacing.sm
-
-      Rectangle {
-        width: Style.space(10)
-        height: width
-        radius: width / 2
-        color: chip.swatch
-        border.width: Style.spacing.hairline
-        border.color: Qt.alpha(root.foreground, 0.45)
-        anchors.verticalCenter: parent.verticalCenter
-      }
-
-      Text {
-        text: chip.label
-        textFormat: Text.PlainText
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        anchors.verticalCenter: parent.verticalCenter
-      }
+      width: swatch.diameter
+      height: width
+      radius: width / 2
+      color: swatch.swatchColor
+      border.width: Style.spacing.hairline
+      border.color: Qt.alpha(root.foreground, 0.3)
     }
 
     MouseArea {
       id: mouse
       anchors.fill: parent
       hoverEnabled: true
-      onClicked: chip.clicked()
-      onContainsMouseChanged: chip.hovered(containsMouse)
+      cursorShape: Qt.PointingHandCursor
+      onClicked: swatch.clicked()
+      onContainsMouseChanged: swatch.hovered(containsMouse)
     }
   }
 
-  function optionLabel(options, value) {
+  component SwatchPicker: Column {
+    id: picker
+
+    property var options: []
+    property string value: ""
+    property string section: ""
+    signal picked(string value)
+
+    readonly property var primary: options.filter(function(o) { return o.group !== "secondary" })
+    readonly property var secondary: options.filter(function(o) { return o.group === "secondary" })
+
+    width: parent ? parent.width : 0
+    spacing: Style.space(4)
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(4)
+
+      Repeater {
+        model: picker.primary
+        delegate: Swatch {
+          required property var modelData
+          required property int index
+          swatchIndex: index
+          swatchColor: modelData.hex
+          selected: picker.value === modelData.value
+          hasCursor: root.cursorActive && root.focusSection === picker.section && root.selectedIndex === index
+          onClicked: picker.picked(modelData.value)
+          onHovered: function(on) { if (on) root.hoverSwatch(picker.section, index) }
+        }
+      }
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(2)
+      visible: picker.secondary.length > 0
+
+      Repeater {
+        model: picker.secondary
+        delegate: Swatch {
+          required property var modelData
+          required property int index
+          readonly property int flatIndex: picker.primary.length + index
+          swatchIndex: flatIndex
+          diameter: Style.space(18)
+          swatchColor: modelData.hex
+          selected: picker.value === modelData.value
+          hasCursor: root.cursorActive && root.focusSection === picker.section && root.selectedIndex === flatIndex
+          onClicked: picker.picked(modelData.value)
+          onHovered: function(on) { if (on) root.hoverSwatch(picker.section, flatIndex) }
+        }
+      }
+    }
+  }
+
+  function sameHex(a, b) {
+    return String(a).toLowerCase() === String(b).toLowerCase()
+  }
+
+  // Options in on-screen order: primaries, then secondaries.
+  function ordered(options) {
+    return options.filter(function(o) { return o.group !== "secondary" })
+      .concat(options.filter(function(o) { return o.group === "secondary" }))
+  }
+
+  // A saved id can be missing when it shares its color with another option.
+  function optionFor(options, value, hex) {
+    if (hasOption(options, value)) return value
     for (var i = 0; i < options.length; i++)
-      if (options[i].value === value) return options[i].label
-    return value
+      if (hex && sameHex(options[i].hex, hex)) return options[i].value
+    return options.length ? options[0].value : value
+  }
+
+  function hoverSwatch(section, index) {
+    cursorActive = true
+    focusSection = section
+    selectedIndex = index
+    revealSoon()
   }
 
   function optionHex(options, value) {
@@ -208,11 +271,10 @@ Item {
     // Start from the theme's saved variant, then leave the picks alone so
     // a refresh never overwrites what is being previewed.
     if (!picksLoaded) {
+      var saved = pairs[field + ":" + logo] || null
       pickSize = size || "default"
-      pickField = field || "dark"
-      pickLogo = logo || "accent"
-      if (!hasOption(fieldOptions, pickField) && fieldOptions.length) pickField = fieldOptions[0].value
-      if (!hasOption(logoOptions, pickLogo) && logoOptions.length) pickLogo = logoOptions[0].value
+      pickField = optionFor(fieldOptions, field || "dark", saved ? saved.field : "")
+      pickLogo = optionFor(logoOptions, logo || "accent", saved ? saved.logo : "")
       picksLoaded = true
     }
   }
@@ -246,14 +308,15 @@ Item {
     return null
   }
 
-  function chipAt(flow, index) {
-    if (!flow) return null
-    var kids = flow.children
-    for (var i = 0; i < kids.length; i++) {
-      var kid = kids[i]
-      if (kid && kid.index === index) return kid
+  function chipAt(picker, index) {
+    if (!picker) return null
+    var rows = picker.children
+    for (var r = 0; r < rows.length; r++) {
+      var kids = rows[r].children || []
+      for (var i = 0; i < kids.length; i++)
+        if (kids[i] && kids[i].swatchIndex === index) return kids[i]
     }
-    return flow
+    return picker
   }
 
   function reveal(item) {
@@ -297,10 +360,10 @@ Item {
     var picked
     if (focusSection === "size") pickSize = optionValue(sizeOptions, selectedIndex) || pickSize
     else if (focusSection === "field") {
-      picked = optionValue(fieldOptions, selectedIndex)
+      picked = optionValue(ordered(fieldOptions), selectedIndex)
       if (picked) pickField = picked
     } else if (focusSection === "logo") {
-      picked = optionValue(logoOptions, selectedIndex)
+      picked = optionValue(ordered(logoOptions), selectedIndex)
       if (picked) pickLogo = picked
     } else if (focusSection === "apply") apply()
     else if (focusSection === "remove") remove()
@@ -392,7 +455,7 @@ Item {
           Column {
             id: column
             width: scroll.width
-            spacing: Style.space(14)
+            spacing: Style.space(10)
 
             PanelHero {
               width: parent.width
@@ -412,7 +475,7 @@ Item {
 
             Rectangle {
               id: preview
-              height: Math.min(Math.round(parent.width * 9 / 16), Style.space(200))
+              height: Math.min(Math.round(parent.width * 9 / 16), Style.space(160))
               width: Math.round(height * 16 / 9)
               anchors.horizontalCenter: parent.horizontalCenter
               radius: Style.cornerRadius
@@ -440,10 +503,57 @@ Item {
               }
             }
 
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              Button {
+                id: applyButton
+                width: root.file !== "" ? Math.round((parent.width - parent.spacing) * 0.62) : parent.width
+                text: root.busy ? "Applying…"
+                  : root.pickIsCurrent ? "Current wallpaper"
+                  : "Set as wallpaper"
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                bordered: true
+                opacity: root.pickIsCurrent && !root.busy ? 0.55 : 1
+                hasCursor: root.cursorActive && root.focusSection === "apply"
+                onHovered: function(on) {
+                  if (!on) return
+                  root.cursorActive = true
+                  root.focusSection = "apply"
+                  root.selectedIndex = 0
+                  root.revealSoon()
+                }
+                onClicked: root.apply()
+              }
+
+              Button {
+                id: removeButton
+                visible: root.file !== ""
+                width: parent.width - applyButton.width - parent.spacing
+                text: "Remove"
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                bordered: true
+                hasCursor: root.cursorActive && root.focusSection === "remove"
+                onHovered: function(on) {
+                  if (!on) return
+                  root.cursorActive = true
+                  root.focusSection = "remove"
+                  root.selectedIndex = 0
+                  root.revealSoon()
+                }
+                onClicked: root.remove()
+              }
+            }
+
             Column {
               id: sizeSection
               width: parent.width
-              spacing: Style.space(6)
+              spacing: Style.space(4)
 
               PanelSectionHeader {
                 text: "SIZE"
@@ -474,48 +584,27 @@ Item {
             Column {
               id: fieldSection
               width: parent.width
-              spacing: Style.space(6)
+              spacing: Style.space(4)
 
               PanelSectionHeader {
-                text: "FIELD"
+                text: "BACKGROUND"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
               }
 
-              Grid {
+              SwatchPicker {
                 id: fieldFlow
-                width: parent.width
-                columns: Math.max(1, Math.min(4, Math.floor(width / Style.space(116))))
-                rowSpacing: Style.spacing.md
-                columnSpacing: Style.spacing.md
-
-                Repeater {
-                  model: root.fieldOptions
-
-                  delegate: PaletteChip {
-                    required property var modelData
-                    required property int index
-                    label: modelData.label
-                    swatch: modelData.hex
-                    selected: root.pickField === modelData.value
-                    hasCursor: root.cursorActive && root.focusSection === "field" && root.selectedIndex === index
-                    onClicked: root.pickField = modelData.value
-                    onHovered: function(on) {
-                      if (!on) return
-                      root.cursorActive = true
-                      root.focusSection = "field"
-                      root.selectedIndex = index
-                      root.revealSoon()
-                    }
-                  }
-                }
+                options: root.fieldOptions
+                value: root.pickField
+                section: "field"
+                onPicked: function(v) { root.pickField = v }
               }
             }
 
             Column {
               id: logoSection
               width: parent.width
-              spacing: Style.space(6)
+              spacing: Style.space(4)
 
               PanelSectionHeader {
                 text: "LOGO"
@@ -523,36 +612,16 @@ Item {
                 fontFamily: root.fontFamily
               }
 
-              Grid {
+              SwatchPicker {
                 id: logoFlow
-                width: parent.width
-                columns: Math.max(1, Math.min(4, Math.floor(width / Style.space(116))))
-                rowSpacing: Style.spacing.md
-                columnSpacing: Style.spacing.md
-
-                Repeater {
-                  model: root.logoOptions
-
-                  delegate: PaletteChip {
-                    required property var modelData
-                    required property int index
-                    label: modelData.label
-                    swatch: modelData.hex
-                    selected: root.pickLogo === modelData.value
-                    hasCursor: root.cursorActive && root.focusSection === "logo" && root.selectedIndex === index
-                    onClicked: root.pickLogo = modelData.value
-                    onHovered: function(on) {
-                      if (!on) return
-                      root.cursorActive = true
-                      root.focusSection = "logo"
-                      root.selectedIndex = index
-                      root.revealSoon()
-                    }
-                  }
-                }
+                options: root.logoOptions
+                value: root.pickLogo
+                section: "logo"
+                onPicked: function(v) { root.pickLogo = v }
               }
 
               Text {
+                visible: text !== ""
                 width: parent.width
                 textFormat: Text.PlainText
                 text: root.styleCaption
@@ -563,47 +632,6 @@ Item {
               }
             }
 
-            Button {
-              id: applyButton
-              width: parent.width
-              text: root.busy ? "Applying…"
-                : root.pickIsCurrent ? "Current wallpaper"
-                : "Set as wallpaper"
-              foreground: root.foreground
-              accent: root.accent
-              fontFamily: root.fontFamily
-              bordered: true
-              opacity: root.pickIsCurrent && !root.busy ? 0.55 : 1
-              hasCursor: root.cursorActive && root.focusSection === "apply"
-              onHovered: function(on) {
-                if (!on) return
-                root.cursorActive = true
-                root.focusSection = "apply"
-                root.selectedIndex = 0
-                root.revealSoon()
-              }
-              onClicked: root.apply()
-            }
-
-            Button {
-              id: removeButton
-              visible: root.file !== ""
-              width: parent.width
-              text: "Remove from this theme"
-              foreground: root.foreground
-              accent: root.accent
-              fontFamily: root.fontFamily
-              bordered: true
-              hasCursor: root.cursorActive && root.focusSection === "remove"
-              onHovered: function(on) {
-                if (!on) return
-                root.cursorActive = true
-                root.focusSection = "remove"
-                root.selectedIndex = 0
-                root.revealSoon()
-              }
-              onClicked: root.remove()
-            }
           }
         }
       }

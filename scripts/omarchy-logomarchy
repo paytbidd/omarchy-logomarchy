@@ -24,12 +24,17 @@ SIZES=(default small xsmall)
 
 SIZE_LABELS=(Default Small "Extra small")
 
-# Field is the wallpaper. Logo is the mark. An option is offered only when
-# the theme defines its color (not every theme has "muted").
-FIELD_IDS=(dark muted light accent)
-FIELD_LABELS=(Dark Muted Light Accent)
-LOGO_IDS=(accent foreground contrast background)
-LOGO_LABELS=(Accent Foreground Contrast Background)
+# Field is the wallpaper. Logo is the mark. Each has a primary set drawn
+# from the theme's UI colors and secondary palette hues. An option is offered
+# only when the theme defines its color, and once per distinct color.
+HUE_IDS=(red orange yellow green cyan blue magenta)
+HUE_LABELS=(Red Orange Yellow Green Cyan Blue Magenta)
+FIELD_PRIMARY=(dark deep muted light accent)
+FIELD_IDS=("${FIELD_PRIMARY[@]}" "${HUE_IDS[@]}")
+FIELD_LABELS=(Dark Deep Muted Light Accent "${HUE_LABELS[@]}")
+LOGO_PRIMARY=(accent foreground contrast background)
+LOGO_IDS=("${LOGO_PRIMARY[@]}" "${HUE_IDS[@]}")
+LOGO_LABELS=(Accent Foreground Contrast Background "${HUE_LABELS[@]}")
 
 declare -A COLOR=()
 PARSED_FIELD=""
@@ -160,13 +165,32 @@ field_hex() {
   local bg=${COLOR[background]:-} fg=${COLOR[foreground]:-}
   case "$1" in
     dark) echo "$bg" ;;
+    deep) echo "${COLOR[darker_background]:-${COLOR[dark_background]:-}}" ;;
     muted) echo "${COLOR[muted]:-}" ;;
     light)
       [[ -n $bg && -n $fg ]] || return 0
       lighter_hex "$bg" "$fg"
       ;;
     accent) echo "${COLOR[accent]:-}" ;;
+    *) hue_hex "$1" ;;
   esac
+}
+
+# Stock themes name their hues; themes derived from alacritty.toml only
+# have the ANSI slots, where red..cyan are color1..color6.
+hue_hex() {
+  local slot
+  case "$1" in
+    red) slot=color1 ;;
+    green) slot=color2 ;;
+    yellow) slot=color3 ;;
+    blue) slot=color4 ;;
+    magenta) slot=color5 ;;
+    cyan) slot=color6 ;;
+    orange) slot="" ;;
+    *) return 0 ;;
+  esac
+  echo "${COLOR[$1]:-${slot:+${COLOR[$slot]:-}}}"
 }
 
 logo_hex() {
@@ -179,6 +203,7 @@ logo_hex() {
       ;;
     foreground) echo "$fg" ;;
     background) echo "$bg" ;;
+    *) hue_hex "$1" ;;
   esac
 }
 
@@ -227,19 +252,22 @@ json_options() {
   local kind="$1"
   local -n ids=$2
   local -n labels=$3
-  local i hex out='[]' line
+  local -n primary=$4
+  local i id hex group
+  local -A seen=()
   for i in "${!ids[@]}"; do
+    id=${ids[$i]}
     if [[ $kind == field ]]; then
-      hex=$(field_hex "${ids[$i]}")
+      hex=$(field_hex "$id")
     else
-      hex=$(logo_hex "${ids[$i]}")
+      hex=$(logo_hex "$id")
     fi
-    [[ -n $hex ]] || continue
-    line=$(jq -cn --arg value "${ids[$i]}" --arg label "${labels[$i]}" --arg hex "$hex" \
-      '{value:$value,label:$label,hex:$hex}')
-    out=$(jq -cn --argjson arr "$out" --argjson item "$line" '$arr + [$item]')
-  done
-  printf '%s' "$out"
+    [[ -n $hex && -z ${seen[${hex,,}]:-} ]] || continue
+    seen[${hex,,}]=1
+    group=secondary
+    in_list "$id" "${primary[@]}" && group=primary
+    printf '%s\t%s\t%s\t%s\n' "$id" "${labels[$i]}" "$hex" "$group"
+  done | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {value: .[0], label: .[1], hex: .[2], group: .[3]})'
 }
 
 json_sizes() {
@@ -436,8 +464,8 @@ cmd_get() {
   fi
 
   if load_theme_colors "$slug"; then
-    fields=$(json_options field FIELD_IDS FIELD_LABELS)
-    logos=$(json_options logo LOGO_IDS LOGO_LABELS)
+    fields=$(json_options field FIELD_IDS FIELD_LABELS FIELD_PRIMARY)
+    logos=$(json_options logo LOGO_IDS LOGO_LABELS LOGO_PRIMARY)
     pairs=$(json_pairs)
     if [[ -n $field && -n $logo ]]; then
       logo_bg=$(field_hex "$field")
