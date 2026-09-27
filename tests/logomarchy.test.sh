@@ -69,7 +69,7 @@ touch "$OMARCHY_PATH/themes/stock/backgrounds/1-art.png"
 
 # Generate: colors, size, and centering.
 out=$("$BIN" generate --theme plain)
-check "default/dark filename" '[[ $out == "$BG/plain/omarchy-logo-default-dark.png" ]]'
+check "default/dark filename" '[[ $out == "$BG/plain/logomarchy-default-dark.png" ]]'
 check "dark background" '[[ $(pixel "$out" 0 0) == 1E1E2E* ]]'
 check "default logo width" '[[ $(magick "$out" -trim -format %w info:) == 1620 ]]'
 check "4K canvas" '[[ $(magick "$out" -format %wx%h info:) == 3840x2160 ]]'
@@ -89,7 +89,7 @@ check "light field stays light" '[[ $(pixel "$out" 0 0) == FAF4ED* ]]'
 check "light logo is the dark color" 'magick "$out" -format %c histogram:info: | grep -qi 575279'
 
 out=$("$BIN" generate --theme plain --field dark --logo foreground)
-check "pairing filename" '[[ $out == "$BG/plain/omarchy-logo-default-dark-foreground.png" ]]'
+check "pairing filename" '[[ $out == "$BG/plain/logomarchy-default-dark-foreground.png" ]]'
 check "pairing logo color" 'magick "$out" -format %c histogram:info: | grep -qi FFFFFF'
 check "pairing keeps dark field" '[[ $(pixel "$out" 0 0) == 1E1E2E* ]]'
 
@@ -122,13 +122,13 @@ rm -rf "$BG"
 use_theme plain
 ln -nsf "$T/elsewhere.png" "$STATE/background"
 "$BIN" auto plain
-check "auto generates default" '[[ -f $BG/plain/omarchy-logo-default-dark.png ]]'
-check "auto sets it when theme had none" 'grep -q "plain/omarchy-logo-default-dark.png" "$T/bg-set.log"'
+check "auto generates default" '[[ -f $BG/plain/logomarchy-default-dark.png ]]'
+check "auto sets it when theme had none" 'grep -q "plain/logomarchy-default-dark.png" "$T/bg-set.log"'
 
 # Auto keeps a variant the user picked.
 "$BIN" generate --theme plain --size small >/dev/null
 "$BIN" auto plain
-check "auto keeps chosen variant" '[[ -f $BG/plain/omarchy-logo-small-dark.png && ! -f $BG/plain/omarchy-logo-default-dark.png ]]'
+check "auto keeps chosen variant" '[[ -f $BG/plain/logomarchy-small-dark.png && ! -f $BG/plain/logomarchy-default-dark.png ]]'
 
 # Auto skips themes that ship their own logo and leaves their art up.
 : >"$T/bg-set.log"
@@ -170,14 +170,14 @@ check "remove deletes files" '[[ ! -d $BG/plain ]]'
 check "remove moves to next background" '[[ $(tail -n1 "$T/bg-set.log") == next ]]'
 
 mkdir -p "$BG/plain"
-touch "$BG/plain/omarchy-logo-xsmall-light.png"
+touch "$BG/plain/logomarchy-xsmall-light.png"
 json=$("$BIN" get --json)
 check "legacy light field" '[[ $(jq -r .field <<<"$json") == light ]]'
 check "legacy light logo" '[[ $(jq -r .logo <<<"$json") == contrast ]]'
 
 # Setup wires the hook and a menu row that the shell's parser accepts.
 MENU="$XDG_CONFIG_HOME/omarchy/extensions/omarchy-menu.jsonc"
-HOOK="$XDG_CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+HOOK="$XDG_CONFIG_HOME/omarchy/hooks/theme-set.d/payton.logomarchy"
 
 menu_parses() {
   node -e '
@@ -207,7 +207,6 @@ mkdir -p "${MENU%/*}"
 cat >"$MENU" <<'EOF'
 {
   // user comment
-  "style.logomarchy": {"icon":"x","label":"Old row","action":"old"},
   "personal": {"icon":"","label":"Personal"},
   "personal.notes": {"icon":"","label":"Notes","action":"notes"}
 }
@@ -216,10 +215,10 @@ EOF
 check "setup installs hook" '[[ -x $HOOK ]]'
 check "setup menu parses" 'menu_parses'
 check "setup keeps user rows" '[[ $(menu_keys) == "style.logomarchy personal personal.notes" ]]'
-check "setup replaces old row" 'grep -q "\"label\": \"Logomarchy\"" "$MENU" && ! grep -q "Old row" "$MENU"'
+check "setup adds the row" 'grep -q "\"label\": \"Logomarchy\"" "$MENU"'
 check "setup keeps comments" 'grep -q "// user comment" "$MENU"'
 check "setup row points at plugin" 'grep -q "$ROOT/scripts/omarchy-logomarchy.* panel" "$MENU"'
-check "setup makes a wallpaper" '[[ -f $BG/plain/omarchy-logo-default-dark.png ]]'
+check "setup makes a wallpaper" '[[ -f $BG/plain/logomarchy-default-dark.png ]]'
 
 before=$(cat "$MENU")
 "$BIN" setup
@@ -232,10 +231,42 @@ check "sed teardown leaves valid menu" 'MENU="$T/menu-sed" menu_parses && [[ $(M
 "$BIN" teardown
 check "teardown removes hook" '[[ ! -e $HOOK ]]'
 check "teardown removes row" '[[ $(menu_keys) == "personal personal.notes" ]] && ! grep -q logomarchy "$MENU"'
-check "teardown keeps wallpapers" '[[ -f $BG/plain/omarchy-logo-default-dark.png ]]'
+check "teardown keeps wallpapers" '[[ -f $BG/plain/logomarchy-default-dark.png ]]'
 
 "$BIN" teardown --purge
 check "purge deletes wallpapers" '[[ ! -d $BG/plain ]]'
+
+# Things the plugin did not write are never changed or removed.
+cat >"$MENU" <<'EOF'
+{
+  "style.logomarchy": {"icon":"x","label":"Mine","action":"mine"},
+}
+EOF
+before=$(cat "$MENU")
+printf '#!/bin/bash\necho mine\n' >"$HOOK"
+mkdir -p "$BG/plain"
+echo "user file" >"$BG/plain/omarchy-logo-mine.png"
+"$BIN" setup 2>/dev/null
+check "setup keeps a user's same-named row" '[[ $(cat "$MENU") == "$before" ]]'
+check "setup keeps a user's hook" '[[ $(cat "$HOOK") == *"echo mine"* ]]'
+"$BIN" teardown --purge
+check "teardown keeps a user's hook" '[[ -f $HOOK ]]'
+check "teardown keeps a user's row" '[[ $(cat "$MENU") == "$before" ]]'
+check "purge keeps unrelated wallpapers" '[[ -f $BG/plain/omarchy-logo-mine.png ]]'
+"$BIN" remove --theme plain
+check "remove keeps unrelated wallpapers" '[[ -f $BG/plain/omarchy-logo-mine.png ]]'
+rm -f "$HOOK" "$BG/plain/omarchy-logo-mine.png"
+
+# The pre-1.0.1 hook name is cleaned up only when it is ours.
+OLD_HOOK="${HOOK%/*}/logomarchy"
+cp "$ROOT/hooks/payton.logomarchy" "$OLD_HOOK"
+rm -f "$MENU"
+"$BIN" setup
+check "setup removes our old hook" '[[ ! -e $OLD_HOOK && -x $HOOK ]]'
+printf '#!/bin/bash\necho other\n' >"$OLD_HOOK"
+"$BIN" teardown
+check "teardown keeps a user's old-named hook" '[[ -f $OLD_HOOK ]]'
+rm -f "$OLD_HOOK"
 
 rm -f "$MENU"
 "$BIN" setup

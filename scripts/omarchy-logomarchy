@@ -15,7 +15,11 @@ USER_BACKGROUNDS="${LOGOMARCHY_BACKGROUNDS:-$CONFIG_HOME/omarchy/backgrounds}"
 LOGO_SVG="${LOGOMARCHY_LOGO:-$OMARCHY_PATH/logo.svg}"
 PLUGIN_ID="payton.logomarchy"
 PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-HOOK_FILE="$CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+HOOK_FILE="$CONFIG_HOME/omarchy/hooks/theme-set.d/payton.logomarchy"
+OLD_HOOK_FILE="$CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+# Every file this plugin writes carries this, so setup and teardown never
+# touch a hook the user wrote.
+HOOK_MARK="payton.logomarchy/scripts/omarchy-logomarchy"
 MENU_FILE="$CONFIG_HOME/omarchy/extensions/omarchy-menu.jsonc"
 
 # Stock logo wallpapers are 3840x2160 with the logo ~1600px wide. The SVG
@@ -304,7 +308,7 @@ json_pairs() {
 logo_files() {
   local slug="$1"
   [[ -d $USER_BACKGROUNDS/$slug ]] || return 0
-  find "$USER_BACKGROUNDS/$slug" -maxdepth 1 -type f -name 'omarchy-logo-*.png' | sort
+  find "$USER_BACKGROUNDS/$slug" -maxdepth 1 -type f -name 'logomarchy-*.png' | sort
 }
 
 theme_ships_logo() {
@@ -337,7 +341,7 @@ render() {
   token=$(variant_token "$field" "$logo")
 
   mkdir -p "$USER_BACKGROUNDS/$slug"
-  out="$USER_BACKGROUNDS/$slug/omarchy-logo-$size-$token.png"
+  out="$USER_BACKGROUNDS/$slug/logomarchy-$size-$token.png"
   tmp=$(mktemp --suffix=.png)
 
   # One rsvg pass draws the field and the scaled logo together.
@@ -456,7 +460,7 @@ cmd_get() {
 
   if [[ -n $file ]]; then
     local name=${file##*/}
-    name=${name#omarchy-logo-}
+    name=${name#logomarchy-}
     name=${name%.png}
     size=${name%%-*}
     local rest=${name#*-}
@@ -506,12 +510,20 @@ cmd_get() {
 
 # Runs from Service.qml each time the shell loads the enabled plugin, so it
 # only writes what is missing or out of date.
+owns_hook() {
+  [[ -f $1 && ! -L $1 ]] && grep -qF "$HOOK_MARK" "$1"
+}
+
 cmd_setup() {
   mkdir -p "${HOOK_FILE%/*}"
-  if ! cmp -s "$PLUGIN_DIR/hooks/logomarchy" "$HOOK_FILE"; then
-    cp "$PLUGIN_DIR/hooks/logomarchy" "$HOOK_FILE"
+  if [[ -e $HOOK_FILE || -L $HOOK_FILE ]] && ! owns_hook "$HOOK_FILE"; then
+    echo "omarchy-logomarchy: $HOOK_FILE is not ours; leaving it and skipping the hook" >&2
+  elif ! cmp -s "$PLUGIN_DIR/hooks/payton.logomarchy" "$HOOK_FILE"; then
+    cp "$PLUGIN_DIR/hooks/payton.logomarchy" "$HOOK_FILE"
     chmod 755 "$HOOK_FILE"
   fi
+  # Hook name used before 1.0.1.
+  owns_hook "$OLD_HOOK_FILE" && rm -f "$OLD_HOOK_FILE"
   python3 "$PLUGIN_DIR/scripts/menu.py" upsert "$MENU_FILE" "$PLUGIN_DIR/scripts/omarchy-logomarchy" || true
   (cmd_auto) || true
 }
@@ -520,12 +532,13 @@ cmd_teardown() {
   local purge=0 current
 
   [[ ${1:-} == --purge ]] && purge=1
-  rm -f "$HOOK_FILE"
+  owns_hook "$HOOK_FILE" && rm -f "$HOOK_FILE"
+  owns_hook "$OLD_HOOK_FILE" && rm -f "$OLD_HOOK_FILE"
   python3 "$PLUGIN_DIR/scripts/menu.py" remove "$MENU_FILE" || true
   ((purge)) || return 0
 
   current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
-  find "$USER_BACKGROUNDS" -mindepth 2 -maxdepth 2 -type f -name 'omarchy-logo-*.png' -delete 2>/dev/null || true
+  find "$USER_BACKGROUNDS" -mindepth 2 -maxdepth 2 -type f -name 'logomarchy-*.png' -delete 2>/dev/null || true
   find "$USER_BACKGROUNDS" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
   if [[ -n $current && ! -f $current ]]; then
     omarchy-theme-bg-next >/dev/null 2>&1 || true

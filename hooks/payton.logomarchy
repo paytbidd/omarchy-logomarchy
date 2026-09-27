@@ -1,5 +1,7 @@
 #!/bin/bash
-# Give the newly applied theme an Omarchy logo wallpaper if it lacks one.
+# Installed by the payton.logomarchy Omarchy plugin, which removes it when
+# the plugin is disabled. Gives the newly applied theme an Omarchy logo
+# wallpaper if it lacks one.
 set -euo pipefail
 
 SCRIPT="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/payton.logomarchy/scripts/omarchy-logomarchy"

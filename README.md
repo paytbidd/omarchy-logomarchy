@@ -34,9 +34,9 @@ Colors come straight from the theme's `colors.toml`, and a color only shows up o
 
 ## What it changes
 
-- `~/.config/omarchy/backgrounds/<theme>/omarchy-logo-*.png`: one generated wallpaper per theme, in the folder Omarchy already uses for extra wallpapers. Nothing inside a theme is modified.
-- `~/.config/omarchy/hooks/theme-set.d/logomarchy`: the theme-set hook.
-- `~/.config/omarchy/extensions/omarchy-menu.jsonc`: one `style.logomarchy` row between `>>> payton.logomarchy` / `<<< payton.logomarchy` comments. The rest of the file is left as is, and it's only written if the result still parses.
+- `~/.config/omarchy/backgrounds/<theme>/logomarchy-*.png`: one generated wallpaper per theme, in the folder Omarchy already uses for extra wallpapers. Nothing inside a theme is modified.
+- `~/.config/omarchy/hooks/theme-set.d/payton.logomarchy`: the theme-set hook. Setup and teardown only touch this file if it is the one the plugin wrote.
+- `~/.config/omarchy/extensions/omarchy-menu.jsonc`: one `style.logomarchy` row between `>>> payton.logomarchy` / `<<< payton.logomarchy` comments. The rest of the file is left as is, and it's only written if the result still parses. If you already have your own `style.logomarchy` row, it's left alone and no row is added.
 
 ## Remove
 

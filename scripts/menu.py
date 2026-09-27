@@ -65,8 +65,8 @@ def match_string(text: str, i: int) -> int:
     return len(text)
 
 
-# Span of `"key": { ... }` plus its trailing comma, for rows added before the
-# markers existed.
+# Span of `"key": { ... }` plus its trailing comma. Used only to notice a
+# row the user wrote with the same key.
 def find_key(text: str, key: str) -> tuple[int, int] | None:
     needle = f'"{key}"'
     start = 0
@@ -104,18 +104,9 @@ def find_key(text: str, key: str) -> tuple[int, int] | None:
         return None
 
 
+# Only the marked block is ours; anything else is the user's.
 def without_row(text: str) -> str:
-    text = BLOCK_RE.sub("", text)
-    span = find_key(text, KEY)
-    if span:
-        start, end = span
-        line_start = text.rfind("\n", 0, start) + 1
-        if not text[line_start:start].strip():
-            start = line_start
-        if text[end:end + 1] == "\n":
-            end += 1
-        text = text[:start] + text[end:]
-    return text
+    return BLOCK_RE.sub("", text)
 
 
 def row_block(action_bin: str) -> str:
@@ -134,6 +125,8 @@ def row_block(action_bin: str) -> str:
 
 def with_row(text: str, action_bin: str) -> str:
     text = without_row(text)
+    if find_key(text, KEY):
+        raise ValueError(f"{KEY} is already defined outside the managed block")
     block = row_block(action_bin)
     if not strip_jsonc(text).strip():
         return "{\n" + block + "}\n"

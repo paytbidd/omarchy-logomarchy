@@ -26,7 +26,9 @@ QtObject {
   readonly property string teardownScript:
       'sleep 2\n'
     + 'if [ -x "$1" ] && jq -e \'any(.plugins[]?; .id == "payton.logomarchy")\' "$2/omarchy/shell.json" >/dev/null 2>&1; then exit 0; fi\n'
-    + 'rm -f "$2/omarchy/hooks/theme-set.d/logomarchy"\n'
+    + 'for hook in "$2/omarchy/hooks/theme-set.d/payton.logomarchy" "$2/omarchy/hooks/theme-set.d/logomarchy"; do\n'
+    + '  if [ -f "$hook" ] && [ ! -L "$hook" ] && grep -qF "payton.logomarchy/scripts/omarchy-logomarchy" "$hook"; then rm -f "$hook"; fi\n'
+    + 'done\n'
     + 'menu="$2/omarchy/extensions/omarchy-menu.jsonc"\n'
     + 'if [ -f "$menu" ] && grep -q ">>> payton.logomarchy" "$menu"; then\n'
     + '  sed -i "/>>> payton\\.logomarchy/,/<<< payton\\.logomarchy/d" "$menu"\n'
