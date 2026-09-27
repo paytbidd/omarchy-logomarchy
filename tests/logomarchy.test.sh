@@ -175,4 +175,73 @@ json=$("$BIN" get --json)
 check "legacy light field" '[[ $(jq -r .field <<<"$json") == light ]]'
 check "legacy light logo" '[[ $(jq -r .logo <<<"$json") == contrast ]]'
 
+# Setup wires the hook and a menu row that the shell's parser accepts.
+MENU="$XDG_CONFIG_HOME/omarchy/extensions/omarchy-menu.jsonc"
+HOOK="$XDG_CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+
+menu_parses() {
+  node -e '
+    const raw = require("fs").readFileSync(process.argv[1], "utf8")
+    const s = raw.replace(/^\s*\/\/[^\n]*(\n|$)/gm, "").replace(/,(\s*[}\]])/g, "$1")
+    const o = JSON.parse(s)
+    if (typeof o !== "object" || o === null) process.exit(1)
+  ' "$MENU" 2>/dev/null || python3 - "$MENU" <<'EOF'
+import json, re, sys
+raw = open(sys.argv[1]).read()
+raw = re.sub(r"^\s*//[^\n]*(\n|$)", "", raw, flags=re.M)
+json.loads(re.sub(r",(\s*[}\]])", r"\1", raw))
+EOF
+}
+
+menu_keys() {
+  python3 - "$MENU" <<'EOF'
+import json, re, sys
+raw = open(sys.argv[1]).read()
+raw = re.sub(r"^\s*//[^\n]*(\n|$)", "", raw, flags=re.M)
+print(" ".join(json.loads(re.sub(r",(\s*[}\]])", r"\1", raw)).keys()))
+EOF
+}
+
+rm -rf "$BG"
+mkdir -p "${MENU%/*}"
+cat >"$MENU" <<'EOF'
+{
+  // user comment
+  "style.logomarchy": {"icon":"x","label":"Old row","action":"old"},
+  "personal": {"icon":"","label":"Personal"},
+  "personal.notes": {"icon":"","label":"Notes","action":"notes"}
+}
+EOF
+"$BIN" setup
+check "setup installs hook" '[[ -x $HOOK ]]'
+check "setup menu parses" 'menu_parses'
+check "setup keeps user rows" '[[ $(menu_keys) == "style.logomarchy personal personal.notes" ]]'
+check "setup replaces old row" 'grep -q "\"label\": \"Logomarchy\"" "$MENU" && ! grep -q "Old row" "$MENU"'
+check "setup keeps comments" 'grep -q "// user comment" "$MENU"'
+check "setup row points at plugin" 'grep -q "$ROOT/scripts/omarchy-logomarchy.* panel" "$MENU"'
+check "setup makes a wallpaper" '[[ -f $BG/plain/omarchy-logo-default-dark.png ]]'
+
+before=$(cat "$MENU")
+"$BIN" setup
+check "setup is idempotent" '[[ $(cat "$MENU") == "$before" ]]'
+
+# The service's inline teardown, which runs without the plugin folder.
+sed "/>>> payton\.logomarchy/,/<<< payton\.logomarchy/d" "$MENU" >"$T/menu-sed"
+check "sed teardown leaves valid menu" 'MENU="$T/menu-sed" menu_parses && [[ $(MENU="$T/menu-sed" menu_keys) == "personal personal.notes" ]]'
+
+"$BIN" teardown
+check "teardown removes hook" '[[ ! -e $HOOK ]]'
+check "teardown removes row" '[[ $(menu_keys) == "personal personal.notes" ]] && ! grep -q logomarchy "$MENU"'
+check "teardown keeps wallpapers" '[[ -f $BG/plain/omarchy-logo-default-dark.png ]]'
+
+"$BIN" teardown --purge
+check "purge deletes wallpapers" '[[ ! -d $BG/plain ]]'
+
+rm -f "$MENU"
+"$BIN" setup
+check "setup creates menu file" 'menu_parses && [[ $(menu_keys) == "style.logomarchy" ]]'
+
+echo '{ "a": {' >"$MENU"
+check "setup leaves broken menu alone" '"$BIN" setup 2>/dev/null; [[ $(cat "$MENU") == "{ \"a\": {" ]]'
+
 echo "ok - $pass checks"

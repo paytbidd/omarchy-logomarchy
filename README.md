@@ -1,71 +1,81 @@
 # Logomarchy
 
-[Omarchy](https://omarchy.org/) logo wallpaper in any theme's colors, including themes that don't ship one.
+For theme hoppers who want to always be repping [Omarchy](https://omarchy.org/) on their desktop.
 
-![Sizes and styles in Catppuccin](preview.png)
+Plenty of themes don't ship their own take on the Omarchy logo wallpaper. Logomarchy makes one for every theme, in that theme's colors. Pick one of three logo sizes, try a few color combos, and set the one you like.
 
-Every time you switch themes, a theme-set hook checks for an Omarchy logo wallpaper. If the theme has none, it makes one from `colors.toml` in the same size and colors as the stock ones: theme background with an accent-colored logo. If the theme has no backgrounds at all, the logo is also set as the wallpaper.
-
-Themes that already ship an Omarchy logo wallpaper are left alone, unless you pick a size or colors for them yourself.
-
-To change the logo on the current theme, open **Style › Logomarchy** in the Omarchy menu:
-
-- **Size:** Default, Small, Extra small
-- **Background:** Dark, Deep, Muted, Light, Accent, plus a row of the theme's palette hues (red, orange, yellow, green, cyan, blue, magenta)
-- **Logo:** Accent, Foreground, Contrast (the theme's darker color), Background, plus the same hues
-
-Colors are unlabeled swatches. One only appears when the theme defines that color, and once per distinct color. Themes without named hues use their ANSI `color1`–`color6`.
-
-Picking an option only redraws the preview, which the panel draws from the vector logo, so it's instant. **Set as wallpaper** renders the 4K file and applies it.
-
-Dark with an Accent logo matches the stock wallpapers. Light with Contrast puts the lighter of the theme's background and foreground behind the mark and the darker color on it. Accent with a Background logo fills the screen with the accent. If the field and the logo would be the same color, the mark falls back to one that still shows.
-
-Each theme remembers its own choice.
+![Logo sizes and colors in Catppuccin](preview.png)
 
 ## Install
 
 ```bash
-git clone https://github.com/paytbidd/omarchy-logomarchy.git ~/.config/omarchy/plugins/payton.logomarchy
-~/.config/omarchy/plugins/payton.logomarchy/install
+omarchy plugin add https://github.com/paytbidd/omarchy-logomarchy.git --enable
 ```
 
-`install` adds the plugin, installs the `theme-set` hook, and makes a logo wallpaper for the current theme.
+That's it. Once enabled, Logomarchy:
 
-Add a menu entry in `~/.config/omarchy/extensions/omarchy-menu.jsonc`:
+- Adds **Style › Logomarchy** to the Omarchy menu (Super+Space)
+- Installs a `theme-set` hook, so every theme you switch to gets a logo wallpaper
+- Makes one for the theme you're on right now
 
-```jsonc
-"style.logomarchy": {
-  "icon": "󰸉",
-  "label": "Logomarchy",
-  "description": "Omarchy logo wallpaper in this theme's colors",
-  "aliases": ["logomarchy", "logo wallpaper"],
-  "action": "~/.config/omarchy/plugins/payton.logomarchy/scripts/omarchy-logomarchy panel"
-}
-```
+## Use
+
+Switch themes as usual. If the new theme has no Omarchy logo wallpaper, you get one that looks like the stock ones: the theme's background with an accent-colored logo. It joins the theme's own wallpapers, so `omarchy theme bg next` cycles through it. If the theme has no wallpapers at all, the logo is set right away. Themes that already ship an Omarchy logo wallpaper are left alone.
+
+To change the logo, open **Style › Logomarchy**:
+
+- **Size:** Default, Small, or Extra small
+- **Background:** a row of the theme's main colors, plus a row of its palette hues
+- **Logo:** the same idea for the mark itself
+
+Picks update the preview instantly. **Set as wallpaper** renders it (3840×2160) and puts it up. **Remove** takes it off this theme. Each theme remembers its own pick.
+
+Colors come straight from the theme's `colors.toml`, and a color only shows up once, even if the theme uses it twice. Themes that only define terminal colors get their hues from `color1`–`color6`.
+
+## What it changes
+
+- `~/.config/omarchy/backgrounds/<theme>/omarchy-logo-*.png`: one generated wallpaper per theme, in the folder Omarchy already uses for extra wallpapers. Nothing inside a theme is modified.
+- `~/.config/omarchy/hooks/theme-set.d/logomarchy`: the theme-set hook.
+- `~/.config/omarchy/extensions/omarchy-menu.jsonc`: one `style.logomarchy` row between `>>> payton.logomarchy` / `<<< payton.logomarchy` comments. The rest of the file is left as is, and it's only written if the result still parses.
 
 ## Remove
 
 ```bash
-~/.config/omarchy/plugins/payton.logomarchy/uninstall
 omarchy plugin remove payton.logomarchy
+```
+
+Disabling or removing the plugin takes out the hook and the menu row. Generated wallpapers stay put in case one is on screen. To delete those too, run this first:
+
+```bash
+~/.config/omarchy/plugins/payton.logomarchy/scripts/omarchy-logomarchy teardown --purge
 ```
 
 ## CLI
 
 ```bash
-omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall] [--field <color>] [--logo <color>] [--style dark|light|accent|<logo>] [--set]
+omarchy-logomarchy generate [--theme <slug>] [--size default|small|xsmall] [--field <color>] [--logo <color>] [--set]
 omarchy-logomarchy auto [<slug>]      # what the hook runs
 omarchy-logomarchy remove [--theme <slug>]
 omarchy-logomarchy get [--json]
 omarchy-logomarchy panel
+omarchy-logomarchy setup              # what the plugin runs when enabled
+omarchy-logomarchy teardown [--purge]
 ```
 
-Files go to `~/.config/omarchy/backgrounds/<theme>/omarchy-logo-<size>-<colors>.png` (3840×2160). The original three keep the short names `dark`, `light`, and `accent`; other pairings are named `field-logo`, such as `dark-foreground`. Nothing inside a theme is modified, so `omarchy theme bg next` cycles through the logo along with the theme's own art.
+The script lives at `~/.config/omarchy/plugins/payton.logomarchy/scripts/omarchy-logomarchy`.
 
-Needs `rsvg-convert` and `magick`, both included in Omarchy.
+Background colors: `dark`, `deep`, `muted`, `light`, `accent`. Logo colors: `accent`, `foreground`, `contrast`, `background`. Both also take `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`. Options the theme doesn't define are skipped.
+
+## Requirements
+
+`rsvg-convert`, `jq`, and `python3`, all included in Omarchy. The logo comes from Omarchy's own `logo.svg`.
 
 ## Tests
 
 ```bash
 tests/logomarchy.test.sh
 ```
+
+## License
+
+[MIT](LICENSE)

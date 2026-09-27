@@ -14,6 +14,9 @@ STOCK_THEMES="$OMARCHY_PATH/themes"
 USER_BACKGROUNDS="${LOGOMARCHY_BACKGROUNDS:-$CONFIG_HOME/omarchy/backgrounds}"
 LOGO_SVG="${LOGOMARCHY_LOGO:-$OMARCHY_PATH/logo.svg}"
 PLUGIN_ID="payton.logomarchy"
+PLUGIN_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+HOOK_FILE="$CONFIG_HOME/omarchy/hooks/theme-set.d/logomarchy"
+MENU_FILE="$CONFIG_HOME/omarchy/extensions/omarchy-menu.jsonc"
 
 # Stock logo wallpapers are 3840x2160 with the logo ~1600px wide. The SVG
 # is drawn on a 15-unit pixel grid (81 cells wide), so whole-pixel cells
@@ -59,6 +62,10 @@ Usage:
   omarchy-logomarchy remove [--theme <slug>]
   omarchy-logomarchy get [--json]     Logo wallpaper state for the current theme
   omarchy-logomarchy panel            Open the picker panel
+  omarchy-logomarchy setup            Add the theme-set hook and Style menu row
+  omarchy-logomarchy teardown [--purge]
+                                      Remove them; --purge also deletes every
+                                      generated wallpaper
 
 Field is the wallpaper color, logo is the mark. Both come from the theme
 palette. --style is the original three pairings, or a logo color on the
@@ -497,7 +504,37 @@ cmd_get() {
   fi
 }
 
+# Runs from Service.qml each time the shell loads the enabled plugin, so it
+# only writes what is missing or out of date.
+cmd_setup() {
+  mkdir -p "${HOOK_FILE%/*}"
+  if ! cmp -s "$PLUGIN_DIR/hooks/logomarchy" "$HOOK_FILE"; then
+    cp "$PLUGIN_DIR/hooks/logomarchy" "$HOOK_FILE"
+    chmod 755 "$HOOK_FILE"
+  fi
+  python3 "$PLUGIN_DIR/scripts/menu.py" upsert "$MENU_FILE" "$PLUGIN_DIR/scripts/omarchy-logomarchy" || true
+  (cmd_auto) || true
+}
+
+cmd_teardown() {
+  local purge=0 current
+
+  [[ ${1:-} == --purge ]] && purge=1
+  rm -f "$HOOK_FILE"
+  python3 "$PLUGIN_DIR/scripts/menu.py" remove "$MENU_FILE" || true
+  ((purge)) || return 0
+
+  current=$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)
+  find "$USER_BACKGROUNDS" -mindepth 2 -maxdepth 2 -type f -name 'omarchy-logo-*.png' -delete 2>/dev/null || true
+  find "$USER_BACKGROUNDS" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
+  if [[ -n $current && ! -f $current ]]; then
+    omarchy-theme-bg-next >/dev/null 2>&1 || true
+  fi
+}
+
 case "${1:-}" in
+  setup) cmd_setup ;;
+  teardown) shift; cmd_teardown "$@" ;;
   generate) shift; cmd_generate "$@" ;;
   auto) shift; cmd_auto "$@" ;;
   remove) shift; cmd_remove "$@" ;;
